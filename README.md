@@ -1,9 +1,45 @@
-# Visual Token Routing
+<div align="center">
+    <h1>Visual Token Routing: Learning to Keep Tokens That Matter</h1>
+    <a href="https://pranjal2041.github.io/vtr/"><img src="https://img.shields.io/website?down_message=down&style=for-the-badge&up_message=up&url=https%3A%2F%2Fpranjal2041.github.io%2Fvtr%2F"></a>
+    <a href="https://pranjal2041.github.io/vtr/paper.pdf"><img src="https://img.shields.io/badge/Paper-PDF-red.svg?style=for-the-badge"></a>
+    <a href="https://huggingface.co/Pranjal2041/VTR-2B"><img src="https://img.shields.io/badge/Hugging%20Face-Model-blue?style=for-the-badge&logo=huggingface"></a>
+    <a href="https://github.com/pranjal2041/vtr"><img src="https://img.shields.io/badge/GitHub-Code-black?style=for-the-badge&logo=github"></a>
+    <br>
+</div>
 
-Project page for "Visual Token Routing: Learning to Keep Tokens That Matter" (Pranjal Aggarwal and Sean Welleck, Carnegie Mellon University).
+<br>
 
-Static site: `index.html`, `style.css`, `app.js`. Open `index.html` through any static server, for example `python3 -m http.server`.
+VTR trains a small router together with a vision-language model. The router decides which visual tokens enter the language model. VTR matches the full-resolution model on OSWorld, CUA-World and video game action prediction with 2.5 to 5.8× fewer visual tokens.
 
-- `assets/examples/` holds the paper's qualitative router outputs: the previous frame and the next frame with the regions VTR drops dimmed.
-- `assets/examples.js` holds the kept-token masks recovered from those images on the model's token grid.
-- `assets/training.png` is the training figure from the paper.
+## Quickstart
+
+You need Linux, an NVIDIA GPU, Python 3.12 and [uv](https://docs.astral.sh/uv/).
+
+```bash
+# 1. Install
+git clone https://github.com/pranjal2041/vtr.git
+cd vtr/inference
+uv sync
+uv run vtr patch
+
+# 2. Start the server
+uv run vtr serve Pranjal2041/VTR-2B --port 8000
+```
+
+The server has an OpenAI-compatible API. See [inference/README.md](inference/README.md) for a sample request and all options.
+
+## Acknowledgments
+
+We thank the Qwen team for Qwen3.5-2B. This code is built on [vLLM](https://github.com/vllm-project/vllm) and [prime-rl](https://github.com/PrimeIntellect-ai/prime-rl).
+
+## Citation
+
+If you use VTR in your research, please cite:
+
+```bibtex
+@misc{aggarwal2026vtr,
+  title={Visual Token Routing: Learning to Keep Tokens That Matter},
+  author={Pranjal Aggarwal and Sean Welleck},
+  year={2026},
+}
+```

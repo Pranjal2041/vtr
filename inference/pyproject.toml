@@ -1,0 +1,51 @@
+[project]
+name = "vtr-inference"
+version = "0.1.0"
+description = "vLLM serving for VTR, a learned visual-token router for Qwen3.5 VLMs"
+readme = "README.md"
+requires-python = "~=3.12.0"
+dependencies = [
+    "vllm==0.21.0+cu129.r42434.pr39568.a106aa6",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "torchaudio==2.11.0",
+]
+
+[project.scripts]
+vtr = "vtr_inference.cli:main"
+
+[project.entry-points."vllm.general_plugins"]
+vtr = "vtr_inference.plugin:register"
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+override-dependencies = [
+    # The runtime the released numbers were measured with.
+    "transformers==5.5.0",
+    "nvidia-cudnn-cu12==9.22.0.52",
+    # The vLLM wheel pins TileLang 0.1.9, which fails to import on some RHEL-based
+    # systems; 0.1.10 fixes that with the same API.
+    "tilelang==0.1.10",
+    "apache-tvm-ffi==0.1.10",
+]
+
+[tool.uv.sources]
+vllm = { url = "https://github.com/PrimeIntellect-ai/prime-rl/releases/download/v0.5.0/vllm-0.21.0+cu129.r42434.pr39568.a106aa6-cp38-abi3-manylinux_2_34_x86_64.whl" }
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vtr_inference"]
+
+[tool.ruff]
+line-length = 120

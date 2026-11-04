@@ -1,0 +1,812 @@
+--- a/vllm/v1/core/encoder_cache_manager.py
++++ b/vllm/v1/core/encoder_cache_manager.py
+@@ -76,6 +76,11 @@
+         self.freeable: OrderedDict[str, int] = OrderedDict()
+         self.freed: list[str] = []
+ 
++        # mm_hash of mm_data => num_encoder_embeds reserved at allocation.
++        # VTR shrinks image placeholders after encoding, so freeing must not
++        # read the size back from the request.
++        self.num_embeds: dict[str, int] = {}
++
+     def reset(self) -> None:
+         """Reset the encoder cache to its initial state.
+ 
+@@ -85,6 +90,7 @@
+         self.cached.clear()
+         self.freeable.clear()
+         self.freed.clear()
++        self.num_embeds.clear()
+         self.num_free_slots = self.cache_size
+         self.num_freeable_slots = self.cache_size
+ 
+@@ -173,6 +179,7 @@
+         while num_embeds > self.num_free_slots:
+             mm_hash, num_free_embeds = self.freeable.popitem(last=False)
+             del self.cached[mm_hash]
++            self.num_embeds.pop(mm_hash, None)
+             self.freed.append(mm_hash)
+             self.num_free_slots += num_free_embeds
+         return True
+@@ -203,6 +210,7 @@
+         self.cached[mm_hash].add(request_id)
+         self.num_free_slots -= num_encoder_embeds
+         self.num_freeable_slots -= num_encoder_embeds
++        self.num_embeds[mm_hash] = num_encoder_embeds
+ 
+     def get_cached_input_ids(self, request: Request) -> set[int]:
+         """Get all cached multimodal input IDs for a request.
+@@ -235,7 +243,9 @@
+             return
+         self.cached[mm_hash].discard(req_id)
+         if not self.cached[mm_hash]:
+-            num_encoder_embeds = request.get_num_encoder_embeds(input_id)
++            num_encoder_embeds = self.num_embeds.get(
++                mm_hash, request.get_num_encoder_embeds(input_id)
++            )
+             self.freeable[mm_hash] = num_encoder_embeds
+             self.num_freeable_slots += num_encoder_embeds
+ 
+--- a/vllm/v1/core/kv_cache_manager.py
++++ b/vllm/v1/core/kv_cache_manager.py
+@@ -6,6 +6,8 @@
+ from dataclasses import dataclass
+ from typing import Literal, overload
+ 
++from vtr_inference.gate_cache import cacheable_length, request_plan
++
+ from vllm.distributed.kv_events import KVCacheEvent
+ from vllm.logger import init_logger
+ from vllm.v1.core.kv_cache_coordinator import get_kv_cache_coordinator
+@@ -206,6 +208,10 @@
+         # num_computed_tokens to be block-size aligned. Removing this limitation
+         # could slightly improve performance in the future.
+         max_cache_hit_length = request.num_tokens - 1
++        if (plan := request_plan(request)) is not None:
++            max_cache_hit_length = min(
++                max_cache_hit_length, cacheable_length(request, plan)
++            )
+         computed_blocks, num_new_computed_tokens = (
+             self.coordinator.find_longest_cache_hit(
+                 request.block_hashes, max_cache_hit_length
+--- a/vllm/v1/core/sched/output.py
++++ b/vllm/v1/core/sched/output.py
+@@ -5,6 +5,8 @@
+ from functools import cached_property
+ from typing import TYPE_CHECKING
+ 
++from vtr_inference.gate_cache import original_features, request_plan
++
+ if TYPE_CHECKING:
+     import numpy as np
+     import numpy.typing as npt
+@@ -50,10 +52,16 @@
+         block_ids: tuple[list[int], ...],
+         prefill_token_ids: list[int] | None = None,
+     ) -> "NewRequestData":
++        prompt_token_ids, mm_features = request.prompt_token_ids, request.mm_features
++        if (plan := request_plan(request)) is not None:
++            # The worker derives M-RoPE positions from the original prompt and
++            # compacts it with the plan, so routed tokens keep their positions.
++            prompt_token_ids = plan["original_ids"]
++            mm_features = original_features(mm_features, plan)
+         return cls(
+             req_id=request.request_id,
+-            prompt_token_ids=request.prompt_token_ids,
+-            mm_features=request.mm_features,
++            prompt_token_ids=prompt_token_ids,
++            mm_features=mm_features,
+             sampling_params=request.sampling_params,
+             pooling_params=request.pooling_params,
+             block_ids=block_ids,
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -7,6 +7,14 @@
+ from dataclasses import replace
+ from typing import Any
+ 
++from vtr_inference.config import VTRConfig
++from vtr_inference.gate_cache import (
++    GatePlanCache,
++    apply_request_plan,
++    prepare_request,
++    request_plan,
++)
++
+ from vllm import envs
+ from vllm.compilation.cuda_graph import CUDAGraphStat
+ from vllm.config import VllmConfig
+@@ -49,6 +57,7 @@
+     create_request_queue,
+ )
+ from vllm.v1.core.sched.utils import check_stop, remove_all
++from vllm.v1.core.single_type_kv_cache_manager import MambaManager
+ from vllm.v1.engine import EngineCoreEventType, EngineCoreOutput, EngineCoreOutputs
+ from vllm.v1.kv_cache_interface import KVCacheConfig
+ from vllm.v1.metrics.perf import ModelMetrics, PerfStats
+@@ -236,6 +245,17 @@
+             hash_block_size=hash_block_size,
+             metrics_collector=self.kv_metrics_collector,
+         )
++        # VTR image-token routing; None unless serving a routed VTR model.
++        self.vtr = VTRConfig.from_hf_config(vllm_config.model_config.hf_config)
++        self.vtr_gate_cache = (
++            GatePlanCache(self.vtr.gate_cache_frames)
++            if self.vtr is not None and self.vtr.gate_cache
++            else None
++        )
++        if self.vtr is not None:
++            for manager in self.kv_cache_manager.coordinator.single_type_managers:
++                if isinstance(manager, MambaManager):
++                    manager.vtr_real_state_blocks = True
+         # Bind GPU block pool to the KV connector. This must happen after
+         # kv_cache_manager is constructed so block_pool is available.
+         if self.connector is not None and hasattr(
+@@ -289,6 +309,10 @@
+         assert num_external_computed_tokens == 0, (
+             "External KV connector is not verified yet"
+         )
++        if request.vtr_compacted:
++            # The worker already chose an aligned chunk end in compacted
++            # space; an original-space split could land inside an image.
++            return num_new_tokens
+         num_computed_tokens = (
+             request.num_computed_tokens
+             + num_new_local_computed_tokens
+@@ -557,6 +581,8 @@
+ 
+                 request = request_queue.peek_request()
+                 request_id = request.request_id
++                if self.vtr_gate_cache is not None and request.num_computed_tokens == 0:
++                    prepare_request(request, self.vtr_gate_cache, self.vtr.block_size)
+ 
+                 # try to promote blocked statuses while traversing skipped queue.
+                 if self._is_blocked_waiting_status(
+@@ -721,6 +747,13 @@
+                         for i in encoder_inputs_to_schedule
+                     )
+ 
++                # VTR compacts a new image prompt in the worker; its blocks are
++                # cached once the scheduler has the compacted token ids.
++                vtr_compacting = (
++                    self.vtr is not None
++                    and bool(request.mm_features)
++                    and request.num_computed_tokens == 0
++                )
+                 new_blocks = self.kv_cache_manager.allocate_slots(
+                     request,
+                     num_new_tokens,
+@@ -728,7 +761,7 @@
+                     new_computed_blocks=new_computed_blocks,
+                     num_lookahead_tokens=effective_lookahead_tokens,
+                     num_external_computed_tokens=num_external_computed_tokens,
+-                    delay_cache_blocks=load_kv_async,
++                    delay_cache_blocks=load_kv_async or vtr_compacting,
+                     num_encoder_tokens=num_encoder_tokens,
+                     full_sequence_must_fit=self.scheduler_reserve_full_isl,
+                 )
+@@ -950,6 +983,7 @@
+ 
+         # Put the request back to the waiting queue.
+         self.waiting.prepend_request(request)
++        request.vtr_checkpoints.clear()
+ 
+     def _update_after_schedule(self, scheduler_output: SchedulerOutput) -> None:
+         # Advance the number of computed tokens for the request AFTER
+@@ -1096,6 +1130,92 @@
+             num_output_tokens=num_output_tokens,
+         )
+ 
++    def _vtr_reconcile(
++        self,
++        request: Request,
++        output: ModelRunnerOutput,
++        generated_token_ids: list[int],
++    ) -> None:
++        """Apply the worker's image-token routing to the request's bookkeeping.
++
++        The scheduler advanced `num_computed_tokens` by the unrouted scheduled
++        count; the worker reports how far it actually got and what it dropped.
++        """
++        req_id = request.request_id
++        block_size = self.cache_config.block_size
++        state_end = (output.vtr_state_ends or {}).get(req_id)
++        if state_end and state_end % block_size == 0:
++            request.vtr_checkpoints.add(state_end // block_size - 1)
++        rollback = (output.vtr_rollback or {}).get(req_id, 0)
++
++        plan = (output.vtr_plans or {}).get(req_id)
++        if plan is not None:
++            current = request_plan(request)
++            if self.vtr_gate_cache is None or current is None:
++                raise RuntimeError(f"Gate plan returned for unplanned request {req_id}")
++            for frame in plan["frames"]:
++                self.vtr_gate_cache.publish(frame)
++            current["frames"] = plan["frames"]
++            request.num_computed_tokens -= rollback
++            apply_request_plan(request, current)
++            request.vtr_compacted = True
++            if (
++                self.scheduler_config.async_scheduling
++                and request.is_prefill_chunk
++                and request.num_computed_tokens >= request.num_prompt_tokens
++                and generated_token_ids
++            ):
++                # The scheduled chunk was partial, but routing finished the
++                # prompt; the async scheduler reserved no output slot for it.
++                request.num_output_placeholders += len(generated_token_ids)
++            return
++
++        dropped = (output.vtr_dropped_tokens or {}).get(req_id, 0)
++        if not dropped:
++            return
++        request.num_computed_tokens -= rollback
++        request.num_prompt_tokens -= dropped
++        request.vtr_compacted = True
++        # Image placeholder ids are identical, so removing any `dropped` of
++        # them yields the compacted prompt.
++        token_ids = request._all_token_ids
++        removed, i = 0, len(token_ids) - 1
++        while removed < dropped and i >= 0:
++            if token_ids[i] == self.vtr.image_token_id:
++                del token_ids[i]
++                removed += 1
++            i -= 1
++        assert removed == dropped, f"Dropped {removed} of {dropped} image tokens"
++
++    def _vtr_schedule_encoder_inputs(
++        self, request: Request, num_new_tokens: int, encoder_compute_budget: int
++    ) -> tuple[list[int], int, int, list[int]]:
++        """Encode every image of a VTR prompt before its first LM token.
++
++        The router scores each image against the images before it, so the
++        whole history must be encoded together, even on a prefix-cache hit.
++        Either all uncached images are scheduled or none, and then no tokens.
++        """
++        inputs: list[int] = []
++        seen: set[str] = set()
++        num_embeds = 0
++        budget = encoder_compute_budget
++        for i, feature in enumerate(request.mm_features):
++            if feature.identifier in seen:
++                continue
++            seen.add(feature.identifier)
++            if self.encoder_cache_manager.check_and_update_cache(request, i):
++                continue
++            if not self.encoder_cache_manager.can_allocate(
++                request, i, budget, num_embeds
++            ):
++                self.encoder_cache_manager.free(request)
++                return [], 0, encoder_compute_budget, []
++            inputs.append(i)
++            num_embeds += request.get_num_encoder_embeds(i)
++            budget -= request.get_num_encoder_embeds(i)
++        return inputs, num_new_tokens, budget, []
++
+     def _try_schedule_encoder_inputs(
+         self,
+         request: Request,
+@@ -1126,6 +1246,10 @@
+         """
+         if num_new_tokens == 0 or not request.has_encoder_inputs:
+             return [], num_new_tokens, encoder_compute_budget, []
++        if self.vtr is not None and not request.vtr_compacted:
++            return self._vtr_schedule_encoder_inputs(
++                request, num_new_tokens, encoder_compute_budget
++            )
+         encoder_inputs_to_schedule: list[int] = []
+         mm_features = request.mm_features
+         assert mm_features is not None
+@@ -1394,6 +1518,9 @@
+                     request_id=req_id,
+                 )
+ 
++            if self.vtr is not None:
++                self._vtr_reconcile(request, model_runner_output, generated_token_ids)
++
+             # Free encoder inputs only after the step has actually executed.
+             if request.has_encoder_inputs:
+                 self._free_encoder_inputs(request)
+@@ -1756,6 +1883,8 @@
+         return len(self.running), len(self.waiting) + len(self.skipped_waiting)
+ 
+     def add_request(self, request: Request) -> None:
++        if request_plan(request) is not None:
++            raise ValueError("Gate plans are created by the scheduler, not clients")
+         existing = self.requests.get(request.request_id)
+         if existing is not None:
+             update = StreamingUpdate.from_request(request)
+@@ -1844,6 +1973,10 @@
+         self, request: Request, delay_free_blocks: bool = False
+     ) -> dict[str, Any] | None:
+         assert request.is_finished()
++        if self.vtr_gate_cache is not None and (
++            (plan := request_plan(request)) is not None
++        ):
++            self.vtr_gate_cache.release(plan["frames"])
+ 
+         connector_delay_free_blocks, kv_xfer_params = self._connector_finished(request)
+         self.encoder_cache_manager.free(request)
+--- a/vllm/v1/core/single_type_kv_cache_manager.py
++++ b/vllm/v1/core/single_type_kv_cache_manager.py
+@@ -5,6 +5,8 @@
+ from collections import defaultdict
+ from collections.abc import Sequence
+ 
++from vtr_inference.gate_cache import request_plan
++
+ from vllm.utils.math_utils import cdiv
+ from vllm.v1.core.block_pool import BlockPool
+ from vllm.v1.core.kv_cache_utils import (
+@@ -805,6 +807,8 @@
+             self.last_state_block_idx: dict[str, int] = {}
+             # The set of the requests that have been allocated blocks
+             self._allocated_block_reqs: set[str] = set()
++        # Set by the scheduler when serving VTR (see allocate_new_blocks).
++        self.vtr_real_state_blocks = False
+ 
+     @classmethod
+     def find_longest_cache_hit(
+@@ -982,13 +986,11 @@
+             num_required_blocks = (
+                 cdiv(num_tokens, self.block_size) + self.num_speculative_blocks
+             )
+-            if num_required_blocks == len(req_blocks):
++            # A VTR prompt is compacted after allocation, so it can need fewer
++            # blocks than it already holds; the extra blocks are freed with it.
++            if num_required_blocks <= len(req_blocks):
+                 return []
+             else:
+-                assert num_required_blocks > len(req_blocks), (
+-                    "num_required_blocks "
+-                    f"{num_required_blocks} < len(req_blocks) {len(req_blocks)}"
+-                )
+                 prev_block_len = len(req_blocks)
+                 blocks_allocated = request_id in self._allocated_block_reqs
+                 # Record the last state block
+@@ -1007,7 +1009,16 @@
+                     num_required_blocks - self.num_speculative_blocks - 1
+                 )
+                 # null blocks
+-                if prev_block_len < num_skipped_blocks:
++                if prev_block_len < num_skipped_blocks and self.vtr_real_state_blocks:
++                    # VTR compacts the prompt after this allocation, which moves
++                    # the kernel's state save index. Real blocks keep every
++                    # index writable.
++                    req_blocks.extend(
++                        self.block_pool.get_new_blocks(
++                            num_skipped_blocks - prev_block_len
++                        )
++                    )
++                elif prev_block_len < num_skipped_blocks:
+                     req_blocks.extend(
+                         [
+                             self._null_block
+@@ -1051,6 +1062,9 @@
+ 
+     def cache_blocks(self, request: Request, num_tokens: int) -> None:
+         num_cached_blocks_before = self.num_cached_block.get(request.request_id, 0)
++        if request_plan(request) is not None:
++            self._cache_vtr_checkpoints(request, num_tokens, num_cached_blocks_before)
++            return
+         super().cache_blocks(request, num_tokens)
+         num_cached_blocks_after = self.num_cached_block.get(request.request_id, 0)
+         if num_cached_blocks_after > num_cached_blocks_before:
+@@ -1062,6 +1076,36 @@
+                 assert block.block_hash is not None
+                 self.cached_blocks_this_step.add(block.block_hash)
+ 
++    def _cache_vtr_checkpoints(
++        self, request: Request, num_tokens: int, num_cached_blocks_before: int
++    ) -> None:
++        """Publish only blocks holding a completed state checkpoint.
++
++        Real state blocks are writable, but the GDN kernel saves state only at
++        the end of a forward. The scheduler records those ends in
++        `request.vtr_checkpoints`; every other block is left uncached.
++        """
++        saved = request.vtr_checkpoints
++        end = max(
++            (i + 1 for i in saved if (i + 1) * self.block_size <= num_tokens),
++            default=0,
++        )
++        if end <= num_cached_blocks_before:
++            return
++        blocks = self.req_to_blocks[request.request_id]
++        sparse = [
++            block if i in saved else self._null_block for i, block in enumerate(blocks)
++        ]
++        self.req_to_blocks[request.request_id] = sparse
++        try:
++            super().cache_blocks(request, end * self.block_size)
++            for block in sparse[num_cached_blocks_before:end]:
++                if not block.is_null:
++                    assert block.block_hash is not None
++                    self.cached_blocks_this_step.add(block.block_hash)
++        finally:
++            self.req_to_blocks[request.request_id] = blocks
++
+     def new_step_starts(self) -> None:
+         self.cached_blocks_this_step.clear()
+ 
+--- a/vllm/v1/engine/core.py
++++ b/vllm/v1/engine/core.py
+@@ -19,6 +19,7 @@
+ 
+ import msgspec
+ import zmq
++from vtr_inference.gate_cache import request_plan
+ 
+ import vllm.envs as envs
+ from vllm.config import ParallelConfig, VllmConfig
+@@ -471,7 +472,14 @@
+ 
+         model_executed = False
+         deferred_scheduler_output = None
+-        if self.scheduler.has_requests():
++        # VTR: a gate-cached prompt can shrink and finish its prefill earlier
++        # than scheduled. Wait for its routed layout before scheduling ahead.
++        routing_pending = any(
++            request_plan(new_request) is not None
++            for _, queued, _ in batch_queue
++            for new_request in queued.scheduled_new_reqs
++        )
++        if self.scheduler.has_requests() and not routing_pending:
+             scheduler_output = self.scheduler.schedule()
+             with self.log_error_detail(scheduler_output):
+                 exec_future = self.model_executor.execute_model(
+--- a/vllm/v1/outputs.py
++++ b/vllm/v1/outputs.py
+@@ -279,6 +279,16 @@
+     # ``None`` when ``enable_return_routed_experts`` is off.
+     routed_experts: RoutedExpertsLists | None = None
+ 
++    # VTR image-token routing, reported per request id:
++    # prompt tokens dropped by the worker (unplanned requests),
++    vtr_dropped_tokens: dict[str, int] | None = None
++    # scheduled tokens left uncomputed after the chunk end moved,
++    vtr_rollback: dict[str, int] | None = None
++    # completed gate plans (gate-cached requests),
++    vtr_plans: dict[str, dict] | None = None
++    # and the computed-token count at the end of this step (gate-cached requests).
++    vtr_state_ends: dict[str, int] | None = None
++
+ 
+ # ModelRunnerOutput wrapper for async scheduling.
+ class AsyncModelRunnerOutput(ABC):
+--- a/vllm/v1/request.py
++++ b/vllm/v1/request.py
+@@ -9,6 +9,7 @@
+ from typing import TYPE_CHECKING, Any
+ 
+ import torch
++from vtr_inference.gate_cache import hash_features, request_plan
+ 
+ from vllm.multimodal.inputs import MultiModalFeatureSpec
+ from vllm.pooling_params import PoolingParams
+@@ -167,6 +168,11 @@
+         # The number of times this request has been preempted by the scheduler.
+         self.num_preemptions = 0
+ 
++        # VTR: the prompt has been compacted to the routed image tokens.
++        self.vtr_compacted = False
++        # VTR: mamba block indices whose state checkpoint the worker completed.
++        self.vtr_checkpoints: set[int] = set()
++
+         self.prefill_stats: PrefillStats | None = PrefillStats()
+ 
+         self.block_hashes: list[BlockHash] = []
+@@ -229,8 +235,20 @@
+ 
+     def update_block_hashes(self) -> None:
+         """Compute block hashes for any new full blocks and append them."""
+-        if self._block_hasher is not None:
++        if self._block_hasher is None:
++            return
++        plan = request_plan(self)
++        if plan is None:
++            self.block_hashes.extend(self._block_hasher(self))
++            return
++        # Key KV blocks by the sampled gate as well as the image, so a block is
++        # only reused by requests that dropped the same tokens.
++        features = self.mm_features
++        self.mm_features = hash_features(features, plan)
++        try:
+             self.block_hashes.extend(self._block_hasher(self))
++        finally:
++            self.mm_features = features
+ 
+     @property
+     def use_structured_output(self) -> bool:
+@@ -277,6 +295,10 @@
+ 
+     def get_num_encoder_embeds(self, input_id: int) -> int:
+         assert input_id < len(self.mm_features)
++        plan = request_plan(self)
++        if plan is not None:
++            # The encoder always produces the full, unrouted image.
++            return plan["frames"][input_id]["length"]
+         return self.mm_features[input_id].mm_position.get_num_embeds()
+ 
+     def record_event(
+--- a/vllm/v1/worker/gpu_model_runner.py
++++ b/vllm/v1/worker/gpu_model_runner.py
+@@ -19,6 +19,7 @@
+ import torch.distributed
+ import torch.nn as nn
+ from tqdm import tqdm
++from vtr_inference.gate_cache import request_plan
+ 
+ import vllm.envs as envs
+ from vllm.compilation.counter import compilation_counter
+@@ -446,6 +447,15 @@
+         # These will be overridden in load_model()
+         self.is_multimodal_pruning_enabled = False
+         self.requires_sequential_video_encoding = False
++        # VTR image-token routing: enabled by the model in load_model().
++        self.vtr_enabled = False
++        # req_id -> image feature index -> routed embeddings. The encoder cache
++        # keeps the full images, which other requests may share.
++        self.vtr_routed_embeds: dict[str, dict[int, torch.Tensor]] = {}
++        # req_id -> gate plan (gate-cached requests only).
++        self.vtr_plans: dict[str, dict] = {}
++        # Routing results of the current step, returned in ModelRunnerOutput.
++        self.vtr_step_output: dict[str, dict | None] = {}
+         # Set to True after init_routed_experts_capturer() completes.
+         # Prevents routed experts code from running during profiling/dummy run.
+         self.routed_experts_initialized = False
+@@ -1094,6 +1104,9 @@
+         for req_id in scheduler_output.finished_req_ids:
+             self.requests.pop(req_id, None)
+             self.num_prompt_logprobs.pop(req_id, None)
++            self.vtr_routed_embeds.pop(req_id, None)
++            if self.vtr_plans.pop(req_id, None) is not None:
++                self.get_model().vtr_release(req_id)
+         self.late_interaction_runner.on_requests_finished(
+             scheduler_output.finished_req_ids
+         )
+@@ -1192,6 +1205,8 @@
+                 lora_request=new_req_data.lora_request,
+             )
+             self.requests[req_id] = req_state
++            if (plan := request_plan(req_state)) is not None:
++                self.vtr_plans[req_id] = plan
+             self.late_interaction_runner.register_request(req_id, pooling_params)
+ 
+             if sampling_params and sampling_params.prompt_logprobs is not None:
+@@ -2799,6 +2814,17 @@
+         if not mm_kwargs:
+             return []
+ 
++        if self.vtr_enabled:
++            # VTR encodes before the step's inputs are prepared; encode each
++            # image once.
++            todo = [i for i, h in enumerate(mm_hashes) if h not in self.encoder_cache]
++            if len(todo) < len(mm_hashes):
++                mm_hashes = [mm_hashes[i] for i in todo]
++                mm_kwargs = [mm_kwargs[i] for i in todo]
++                mm_lora_refs = [mm_lora_refs[i] for i in todo]
++                if not mm_kwargs:
++                    return []
++
+         # `prompt_embeds` is a passthrough modality, the tensor is already in
+         # the model embedding space, so no encoder runs. Inject each
+         # `prompt_embeds` tensor directly into the encoder cache here so that
+@@ -3000,6 +3026,152 @@
+ 
+         return encoder_outputs
+ 
++    def _vtr_route_images(self, scheduler_output: "SchedulerOutput") -> None:
++        """Route the image tokens of prompts that start their prefill.
++
++        How many image tokens a request keeps is known only after its images
++        are encoded and routed, but the scheduler sizes every step for the full
++        prompt. Before the step's inputs are prepared, encode the images, run
++        the router over each request's images in order, and compact the
++        request's prompt, placeholders and M-RoPE positions to the kept tokens.
++        Survivors keep their original positions. The scheduler reconciles its
++        bookkeeping from `self.vtr_step_output`.
++        """
++        self._execute_mm_encoder(scheduler_output)
++        model = self.get_model()
++        dropped: dict[str, int] = {}
++        rollback: dict[str, int] = {}
++        plans: dict[str, dict] = {}
++        for req_id in scheduler_output.num_scheduled_tokens:
++            if req_id in self.vtr_routed_embeds:
++                continue
++            req_state = self.requests[req_id]
++            images = [
++                (i, feature)
++                for i, feature in enumerate(req_state.mm_features)
++                if feature.modality == "image"
++            ]
++            if not images:
++                continue
++            req_index = self.input_batch.req_id_to_index[req_id]
++            num_computed = int(self.input_batch.num_computed_tokens_cpu[req_index])
++            if num_computed >= len(req_state.prompt_token_ids):
++                continue
++            entries = [self.encoder_cache.get(f.identifier) for _, f in images]
++            if any(entry is None for entry in entries):
++                raise RuntimeError(f"Request {req_id} is missing encoder outputs")
++
++            plan = self.vtr_plans.get(req_id)
++            routed = model.vtr_route(entries, plan, req_id)
++            if plan is not None:
++                plans[req_id] = deepcopy(plan)
++            self.vtr_routed_embeds[req_id] = {
++                i: embeds for (i, _), (embeds, _) in zip(images, routed, strict=True)
++            }
++            num_kept = [embeds.shape[0] for embeds, _ in routed]
++            num_dropped = sum(f.mm_position.length for _, f in images) - sum(num_kept)
++            if num_dropped == 0:
++                continue
++
++            # Drop the rejected tokens of each image span and shrink its
++            # placeholder in place (the scheduler's request shares it when
++            # no gate plan is used).
++            prompt_ids = req_state.prompt_token_ids
++            keep = np.ones(len(prompt_ids), dtype=bool)
++            shift = 0
++            for (_, feature), (embeds, kept) in sorted(
++                zip(images, routed, strict=True),
++                key=lambda item: item[0][1].mm_position.offset,
++            ):
++                offset, length = feature.mm_position.offset, feature.mm_position.length
++                if embeds.shape[0] < length:
++                    keep[offset : offset + length] = False
++                    keep[offset + kept.numpy()] = True
++                feature.mm_position = PlaceholderRange(
++                    offset=offset - shift, length=embeds.shape[0], is_embed=None
++                )
++                shift += length - embeds.shape[0]
++            keep_idx = np.nonzero(keep)[0].tolist()
++            new_len = len(keep_idx)
++            new_ids = [prompt_ids[i] for i in keep_idx]
++            req_state.prompt_token_ids = new_ids
++            req_state.num_prompt_tokens = new_len
++            token_ids = self.input_batch.token_ids_cpu
++            token_ids[req_index, :new_len] = np.asarray(new_ids, dtype=token_ids.dtype)
++            self.input_batch.num_prompt_tokens[req_index] = new_len
++            self.input_batch.num_tokens_no_spec[req_index] = new_len
++            if req_state.mrope_positions is not None:
++                keep_t = torch.as_tensor(
++                    keep_idx, device=req_state.mrope_positions.device
++                )
++                req_state.mrope_positions = req_state.mrope_positions[
++                    :, keep_t
++                ].contiguous()
++            # Decoding continues after the original last position.
++            if req_state.mrope_position_delta is not None:
++                req_state.mrope_position_delta += num_dropped
++
++            # Choose this step's end in compacted space, within the scheduled
++            # token budget and, where possible, block aligned outside images.
++            num_scheduled = scheduler_output.num_scheduled_tokens[req_id]
++            budget_end = num_computed + num_scheduled
++            block_size = self.cache_config.block_size
++            if new_len <= budget_end:
++                end = new_len
++                checkpoint = (new_len - 1) // block_size * block_size
++                if (
++                    plan is not None
++                    and self.cache_config.enable_prefix_caching
++                    and num_computed < checkpoint
++                ):
++                    # The GDN state is saved only at the end of a forward: stop
++                    # on the last full block so later requests can resume there.
++                    end = checkpoint
++            else:
++                spans = [
++                    (f.mm_position.offset, f.mm_position.length) for _, f in images
++                ]
++                end = min(budget_end, new_len) // block_size * block_size
++                moved = True
++                while moved:
++                    moved = False
++                    for offset, length in spans:
++                        if offset < end < offset + length:
++                            end = offset // block_size * block_size
++                            moved = True
++                if end <= num_computed:
++                    end = min(budget_end, new_len)
++            assert num_computed < end <= budget_end
++            scheduler_output.num_scheduled_tokens[req_id] = end - num_computed
++            scheduler_output.total_num_scheduled_tokens -= budget_end - end
++            rollback[req_id] = budget_end - end
++            if plan is None:
++                dropped[req_id] = num_dropped
++            logger.debug(
++                "VTR %s: %d of %d image tokens kept, per image %s",
++                req_id,
++                sum(num_kept),
++                sum(num_kept) + num_dropped,
++                num_kept,
++            )
++
++        self.vtr_step_output = {
++            "vtr_dropped_tokens": dropped or None,
++            "vtr_rollback": rollback or None,
++            "vtr_plans": plans or None,
++            "vtr_state_ends": {
++                req_id: int(
++                    self.input_batch.num_computed_tokens_cpu[
++                        self.input_batch.req_id_to_index[req_id]
++                    ]
++                )
++                + num_tokens
++                for req_id, num_tokens in scheduler_output.num_scheduled_tokens.items()
++                if req_id in self.vtr_plans
++            }
++            or None,
++        }
++
+     def _gather_mm_embeddings(
+         self,
+         scheduler_output: "SchedulerOutput",
+@@ -3023,7 +3195,8 @@
+             req_state = self.requests[req_id]
+             num_computed_tokens = req_state.num_computed_tokens + shift_computed_tokens
+ 
+-            for mm_feature in req_state.mm_features:
++            routed_embeds = self.vtr_routed_embeds.get(req_id, {})
++            for feature_index, mm_feature in enumerate(req_state.mm_features):
+                 pos_info = mm_feature.mm_position
+                 start_pos = pos_info.offset
+                 num_encoder_tokens = pos_info.length
+@@ -3055,7 +3228,9 @@
+                     continue
+ 
+                 mm_hash = mm_feature.identifier
+-                encoder_output = self.encoder_cache.get(mm_hash, None)
++                encoder_output = routed_embeds.get(feature_index)
++                if encoder_output is None:
++                    encoder_output = self.encoder_cache.get(mm_hash, None)
+                 assert encoder_output is not None, f"Encoder cache miss for {mm_hash}."
+ 
+                 if (is_embed := pos_info.is_embed) is not None:
+@@ -3393,6 +3568,15 @@
+                 num_input_tokens, intermediate_tensors, True
+             )
+ 
++        if num_input_tokens > num_scheduled_tokens:
++            # Zero the padded tail; CUDA-graph replays can read stale values
++            # there (vllm-project/vllm#42779).
++            pad = slice(num_scheduled_tokens, num_input_tokens)
++            for tensor in (input_ids, inputs_embeds):
++                if tensor is not None:
++                    tensor[pad].zero_()
++            positions[..., pad].zero_()
++
+         if is_encoder_decoder and scheduler_output.scheduled_encoder_inputs:
+             # Run the encoder, just like we do with other multimodal inputs.
+             # For an encoder-decoder model, our processing here is a bit
+@@ -3928,6 +4112,11 @@
+             # Update persistent batch states.
+             deferred_state_corrections_fn = self._update_states(scheduler_output)
+ 
++            self.vtr_step_output = {}
++            if self.vtr_enabled and scheduler_output.num_scheduled_tokens:
++                self._vtr_route_images(scheduler_output)
++                num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
++
+             if has_ec_transfer() and not get_ec_transfer().is_consumer:
+                 with self.maybe_get_ec_connector_output(
+                     scheduler_output,
+@@ -4438,6 +4627,7 @@
+                 num_nans_in_logits=num_nans_in_logits,
+                 cudagraph_stats=cudagraph_stats,
+                 routed_experts=None,
++                **self.vtr_step_output,
+             )
+ 
+         if not self.use_async_scheduling:
+@@ -5018,6 +5208,7 @@
+             and mm_config is not None
+             and mm_config.is_multimodal_pruning_enabled()
+         )
++        self.vtr_enabled = getattr(self.get_model(), "vtr_enabled", False)
+         self.requires_sequential_video_encoding = hasattr(
+             self.get_model(), "requires_sequential_video_encoding"
+         )  # Temporary hack for dynamic res video w/o support for bs>1 yet
