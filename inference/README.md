@@ -16,7 +16,7 @@ uv run vtr patch
 ## Serve
 
 ```bash
-uv run vtr serve Pranjal2041/VTR-2B --port 8000
+uv run vtr serve l3lab/VTR-2B --port 8000
 ```
 
 | Flag | What it does |
@@ -50,7 +50,7 @@ def image(path):
     return {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}
 
 response = client.chat.completions.create(
-    model="Pranjal2041/VTR-2B",
+    model="l3lab/VTR-2B",
     messages=[{"role": "user", "content": [
         image("step_0.png"), image("step_1.png"), image("step_2.png"),
         {"type": "text", "text": "What changed on the screen, and what should I click next?"},

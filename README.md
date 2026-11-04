@@ -2,7 +2,7 @@
     <h1>Visual Token Routing: Learning to Keep Tokens That Matter</h1>
     <a href="https://pranjal2041.github.io/vtr/"><img src="https://img.shields.io/website?down_message=down&style=for-the-badge&up_message=up&url=https%3A%2F%2Fpranjal2041.github.io%2Fvtr%2F"></a>
     <a href="https://pranjal2041.github.io/vtr/paper.pdf"><img src="https://img.shields.io/badge/Paper-PDF-red.svg?style=for-the-badge"></a>
-    <a href="https://huggingface.co/Pranjal2041/VTR-2B"><img src="https://img.shields.io/badge/Hugging%20Face-Model-blue?style=for-the-badge&logo=huggingface"></a>
+    <a href="https://huggingface.co/l3lab/VTR-2B"><img src="https://img.shields.io/badge/Hugging%20Face-Model-blue?style=for-the-badge&logo=huggingface"></a>
     <a href="https://github.com/pranjal2041/vtr"><img src="https://img.shields.io/badge/GitHub-Code-black?style=for-the-badge&logo=github"></a>
     <br>
 </div>
@@ -23,7 +23,7 @@ uv sync
 uv run vtr patch
 
 # 2. Start the server
-uv run vtr serve Pranjal2041/VTR-2B --port 8000
+uv run vtr serve l3lab/VTR-2B --port 8000
 ```
 
 The server has an OpenAI-compatible API. See [inference/README.md](inference/README.md) for a sample request and all options.
