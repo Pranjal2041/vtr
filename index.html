@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Visual Token Routing: Learning to Keep Tokens That Matter</title>
-<meta name="description" content="Visual Token Routing (VTR) trains a lightweight router jointly with a vision-language model to decide which visual tokens enter the language model. It matches full-resolution performance on OSWorld, CUA-World and video game action prediction with 2.5 to 5.8 times fewer visual tokens.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%230891b2%22/%3E%3Crect x=%224%22 y=%224%22 width=%224%22 height=%224%22 fill=%22%23fff%22/%3E%3Crect x=%229%22 y=%229%22 width=%223%22 height=%223%22 fill=%22%23fff%22/%3E%3C/svg%3E">
+<meta name="description" content="Visual Token Routing (VTR) trains a small router jointly with a vision-language model to decide which visual tokens enter the language model. It matches full-resolution performance on OSWorld, CUA-World and video game action prediction with 2.5 to 5.8 times fewer visual tokens.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -19,16 +20,16 @@
     <p class="hero-tagline">Learning to Keep Tokens That Matter</p>
     <p class="hero-authors"><span>Pranjal Aggarwal · Sean Welleck</span><br>Carnegie Mellon University</p>
     <p class="hero-blurb">
-      Computer-use agents encode every screenshot as thousands of visual tokens.
-      <strong>VTR</strong> trains a lightweight router together with the agent to decide which of these tokens
-      enter the language model. It matches the full-resolution model with 2.5 to 5.8× fewer visual tokens.
+      VLM agents represent every screenshot as thousands of visual tokens. <strong>VTR</strong> trains a small router
+      jointly with the model to decide which of these tokens enter the language model, and matches the
+      full-resolution model with 2.5 to 5.8× fewer visual tokens.
     </p>
     <div class="btn-row">
       <a class="btn btn-primary" href="#" id="paper-link">📄 Paper</a>
       <a class="btn" href="#" id="code-link">💻 Code</a>
-      <a class="btn" href="#examples">🔍 Examples</a>
+      <a class="btn" href="#router">🔀 Router</a>
+      <a class="btn" href="#method">🧭 How It Works</a>
       <a class="btn" href="#results">📈 Results</a>
-      <a class="btn" href="#method">🧭 Method</a>
       <a class="btn" href="#citation">📚 BibTeX</a>
     </div>
   </div>
@@ -109,6 +110,86 @@
   </div>
 </section>
 
+<!-- ═══ ROUTER ═══ -->
+<section id="router">
+  <div class="container">
+    <div class="section-label">The Router</div>
+    <h2 class="section-title">Spatio-Temporal Router</h2>
+    <p class="section-subtitle">
+      Whether a visual token is redundant depends on the screenshots before it. For each image region, a small MLP
+      reads the tokens of that region in the current screenshot and the <i>K</i> previous ones, and outputs a keep
+      probability. A gate sampled from this probability decides whether the token enters the language model.
+    </p>
+    <div class="rt-card">
+      <div class="rt-grid">
+        <div class="rt-screen">
+          <div class="rt-cap">Current screenshot <i>o</i><sub><i>t</i></sub>. Click any region <i>j</i>.</div>
+          <canvas id="rt-frame" width="576" height="336"></canvas>
+          <div class="rt-chips" id="rt-chips">
+            <button data-r="field">File name</button><button data-r="video">Video</button>
+            <button data-r="clock">Clock</button><button data-r="static">Background</button>
+          </div>
+        </div>
+        <div class="rt-pipe">
+          <div class="rt-stage" id="st-crops">
+            <div class="rt-cap">Region <i>j</i> over time</div>
+            <div class="rt-crops" id="rt-crops"></div>
+          </div>
+          <div class="rt-arrow" id="ar-1">→</div>
+          <div class="rt-stage" id="st-mlp">
+            <div class="rt-cap">Router <i>f</i><sub><i>φ</i></sub></div>
+            <svg id="rt-mlp" viewBox="0 0 120 120" width="120" height="120"></svg>
+            <div class="rt-formula"><i>p</i><sub><i>t,j</i></sub> = σ(<i>f</i><sub><i>φ</i></sub>(<i>x</i><sub><i>t,j</i></sub>))</div>
+          </div>
+          <div class="rt-arrow" id="ar-2">→</div>
+          <div class="rt-stage" id="st-p">
+            <div class="rt-cap">Keep probability</div>
+            <div class="rt-gauge"><div id="rt-gauge"></div></div>
+            <div class="rt-pval" id="rt-pval">0.00</div>
+          </div>
+          <div class="rt-arrow" id="ar-3">→</div>
+          <div class="rt-stage" id="st-gate">
+            <div class="rt-cap"><i>g</i> ~ Bernoulli(<i>p</i>)</div>
+            <div class="rt-coin" id="rt-coin">?</div>
+            <div class="rt-out" id="rt-out"></div>
+          </div>
+        </div>
+      </div>
+      <div class="rt-seq">
+        <div class="rt-cap">Gates for every region of <i>o</i><sub><i>t</i></sub>. Kept tokens enter the language model scaled by <i>p</i>, at their original positions: <b id="rt-count"></b></div>
+        <div class="rt-seq-row">
+          <canvas id="rt-map" width="576" height="336"></canvas>
+          <div class="rt-tokens" id="rt-tokens"></div>
+        </div>
+      </div>
+      <div class="rt-controls">
+        <button class="btn btn-small" id="rt-play">❚❚ Pause</button>
+        <button class="btn btn-small" id="rt-resample">Sample gates again</button>
+        <span class="note">Simulated desktop with <i>K</i> = 3 shown. The paper uses <i>K</i> = 10. Keep probabilities are illustrative.</span>
+      </div>
+    </div>
+
+    <div class="rt-card an-card">
+      <div class="an-head">
+        <div>
+          <h3>Anchors</h3>
+          <p>The first observation of each block of <i>B</i> is an anchor and is kept in full. The router acts on the other observations, with its history starting at the anchor, so each block refreshes the full view of the screen. The sliding variant keeps only the first observation in full and uses a rolling window of <i>K</i> previous observations.</p>
+        </div>
+        <div class="tabs left" id="an-tabs" style="margin:0">
+          <button class="tab active" data-m="anchors">Anchors</button>
+          <button class="tab" data-m="sliding">Sliding router</button>
+        </div>
+      </div>
+      <div class="an-frames" id="an-frames"></div>
+      <div class="an-seq">
+        <div class="an-row"><span class="an-name">Full resolution</span><div class="an-bar"><div id="an-full"></div></div><span class="an-num" id="an-full-n"></span></div>
+        <div class="an-row"><span class="an-name" style="color:var(--accent)">VTR</span><div class="an-bar" id="an-vtr"></div><span class="an-num" id="an-vtr-n"></span></div>
+      </div>
+      <p class="note">Twelve observations with <i>B</i> = 6 shown. The paper uses <i>B</i> = 10. Blue segments are anchor tokens and orange segments are routed tokens.</p>
+    </div>
+  </div>
+</section>
+
 <!-- ═══ SIMULATED DESKTOP ═══ -->
 <section id="compare-rules">
   <div class="container">
@@ -140,41 +221,100 @@
   </div>
 </section>
 
-<!-- ═══ EXAMPLES ═══ -->
-<section id="examples">
+<!-- ═══ METHOD ═══ -->
+<section id="method">
   <div class="container">
-    <div class="section-label">Examples</div>
-    <h2 class="section-title">Your Selection Compared with VTR</h2>
+    <div class="section-label">The Method</div>
+    <h2 class="section-title">How It Works</h2>
     <p class="section-subtitle">
-      Each example shows the previous frame of a game and describes the next one. Select the regions you expect the
-      agent to need, then compare them with the regions VTR kept.
+      We train the router jointly with the language model, to keep as few visual tokens as possible without losing
+      accuracy. Two reference models measure how much accuracy dropping tokens costs, and an adaptive weight keeps
+      that cost within a small tolerance.
     </p>
-    <div class="tabs left" id="quiz-tabs" style="margin-top:1.5rem"></div>
-    <div class="quiz" id="quiz-box">
-      <div class="quiz-board">
-        <img id="quiz-img" alt="Game frame">
-        <div class="quiz-grid" id="quiz-grid"></div>
+    <div class="steps">
+      <div class="step-tabs" id="step-tabs">
+        <button class="step-tab active" data-step="0"><span>01</span>Joint Training</button>
+        <button class="step-tab" data-step="1"><span>02</span>Measuring Degradation</button>
+        <button class="step-tab" data-step="2"><span>03</span>Adaptive Weight</button>
+        <button class="step-tab" data-step="3"><span>04</span>Initialization</button>
       </div>
-      <div class="quiz-side">
-        <h3 id="quiz-name"></h3>
-        <p class="quiz-setup" id="quiz-setup"></p>
-        <p class="quiz-picked" id="quiz-picked"></p>
-        <div class="quiz-actions">
-          <button class="btn btn-primary btn-small" id="quiz-reveal">Show VTR</button>
-          <button class="btn btn-small" id="quiz-clear">Clear</button>
-          <button class="btn btn-small" id="quiz-next">Next example</button>
-        </div>
-        <div class="quiz-result">
-          <div class="quiz-score">
-            <div><b id="qs-you">0</b><span>selected</span></div>
-            <div><b id="qs-vtr" style="color:var(--accent)">0</b><span>kept by VTR</span></div>
-            <div><b id="qs-both">0</b><span>overlap</span></div>
+
+      <div class="step-panel active wide" data-step="0">
+        <div class="step-vis"><canvas id="jt-canvas" width="1360" height="660"></canvas></div>
+        <div class="step-text">
+          <div class="jt-head">
+            <h3>Joint Training</h3>
+            <div class="tabs left" id="jt-mode" style="margin:0">
+              <button class="tab active" data-m="train">Training</button>
+              <button class="tab" data-m="infer">Inference</button>
+            </div>
           </div>
-          <p class="quiz-note" id="quiz-note"></p>
-          <p class="note" style="margin-top:0.7rem">
-            <span class="legend-dot" style="border:2px solid var(--kept)"></span>VTR
-            <span class="legend-dot" style="border:2px dashed #f59e0b; margin-left:0.8rem"></span>your selection
-          </p>
+          <ol class="jt-phases" id="jt-phases">
+            <li>Sample gates and run three models on the same example: the full model on all tokens, the VLM <i>π</i><sub><i>θ</i></sub> on the kept tokens, and the blind model on the anchors only.</li>
+            <li>Update <i>π</i><sub><i>θ</i></sub> and the router with the cross-entropy (CE) loss on the kept tokens. The full and blind models are updated with the same loss on their own inputs.</li>
+            <li>Sample a second set of gates and update only the router with ℒ<sub>tok</sub> + <i>λ</i> ℒ<sub>deg</sub>, keeping <i>π</i><sub><i>θ</i></sub> fixed.</li>
+            <li>Update <i>λ</i> by dual ascent on the degradation ratio <i>r̄</i>.</li>
+          </ol>
+          <p class="note" id="jt-note">The reference models are used only during training. Click a step to show it.</p>
+        </div>
+      </div>
+
+      <div class="step-panel" data-step="1">
+        <div class="step-vis">
+          <div class="tabs left" id="dg-type" style="margin-bottom:0.75rem">
+            <button class="tab active" data-t="needs">Token that needs the history</button>
+            <button class="tab" data-t="anchors">Token the anchors already predict</button>
+          </div>
+          <svg id="dg-axis" viewBox="0 0 760 230" width="100%"></svg>
+          <div class="dg-slider">
+            <label for="dg-k">Tokens kept by the router</label>
+            <input type="range" id="dg-k" min="0" max="100" value="25">
+            <b id="dg-kval">25%</b>
+          </div>
+          <div class="dg-read" id="dg-read"></div>
+        </div>
+        <div class="step-text">
+          <h3>Measuring Degradation</h3>
+          <p>For each action token <i>n</i>, <i>i</i><sub><i>n</i></sub> = ℓ<sup>blind</sup><sub><i>n</i></sub> − ℓ<sup>full</sup><sub><i>n</i></sub> is how much the full history helps, and <i>d</i><sub><i>n</i></sub> = ℓ<sup>sparse</sup><sub><i>n</i></sub> − ℓ<sup>full</sup><sub><i>n</i></sub> is how much dropping tokens hurts. Subtracting ℓ<sup>full</sup><sub><i>n</i></sub> removes how hard the token is to predict in the first place.</p>
+          <p class="formula">ℒ<sub>deg</sub> = Σ [<i>i</i><sub><i>n</i></sub>]<sub>+</sub> <i>d</i><sub><i>n</i></sub> / Σ [<i>i</i><sub><i>n</i></sub>]<sub>+</sub></p>
+          <p>Tokens that the anchors predict as well as the full history get zero weight, since dropping tokens should not matter for them.</p>
+          <p class="note">Loss values are illustrative.</p>
+        </div>
+      </div>
+
+      <div class="step-panel" data-step="2">
+        <div class="step-vis">
+          <canvas id="aw-chart" width="960" height="600"></canvas>
+          <div class="dg-slider">
+            <label for="aw-r">Tolerance <i>r</i>*</label>
+            <input type="range" id="aw-r" min="2" max="40" value="10">
+            <b id="aw-rval">0.10</b>
+            <button class="btn btn-small" id="aw-run">▶ Train</button>
+          </div>
+        </div>
+        <div class="step-text">
+          <h3>Adaptive Weight</h3>
+          <p>We minimize the expected fraction of kept tokens subject to <i>r̄</i> ≤ <i>r</i>*, where <i>r̄</i> = Σ<i>d</i><sub><i>n</i></sub> / Σ<i>i</i><sub><i>n</i></sub> is the share of the benefit of the full history that the model loses. ℒ<sub>tok</sub> + <i>λ</i> ℒ<sub>deg</sub> is the Lagrangian of this problem, and we update <i>λ</i> by dual ascent:</p>
+          <p class="formula"><i>λ</i> ← max(0, <i>λ</i> + <i>α</i>(<i>r̄</i> − <i>r</i>*))</p>
+          <p>When <i>r̄</i> is above <i>r</i>*, <i>λ</i> grows and the router keeps more tokens. When it is below, <i>λ</i> shrinks and the router drops more. The tolerance constrains accuracy, not the number of tokens, so a smaller <i>r</i>* leads to more kept tokens. We set <i>r</i>* = 0.1.</p>
+          <p class="note">Curves are simulated with a toy degradation curve, with <i>α</i> = 0.2, <i>λ</i><sub>0</sub> = 0.5 and a 10 times larger step when <i>r̄</i> is below <i>r</i>*. Gray points are the validation <i>r̄</i> of the VTR training run with <i>r</i>* = 0.1.</p>
+        </div>
+      </div>
+
+      <div class="step-panel" data-step="3">
+        <div class="step-vis">
+          <div class="in-grid">
+            <div><div class="rt-cap">Changed since the previous observation</div><canvas id="in-changed" width="576" height="336"></canvas></div>
+            <div><div class="rt-cap">Objects segmented by SAM</div><canvas id="in-objects" width="576" height="336"></canvas></div>
+            <div><div class="rt-cap">Initial label: changed and an object</div><canvas id="in-label" width="576" height="336"></canvas></div>
+            <div><div class="rt-cap">After joint training</div><canvas id="in-vtr" width="576" height="336"></canvas></div>
+          </div>
+        </div>
+        <div class="step-text">
+          <h3>Initialization</h3>
+          <p>In joint training, the router learns which tokens matter only through the loss of <i>π</i><sub><i>θ</i></sub>, which is a weak signal for a router with random weights. We first train the router alone, for 558 steps, to predict simple labels: a token is kept only if its region changed from the previous observation and belongs to an object segmented by SAM.</p>
+          <p>Joint training starts from this router and refines its decisions. Keeping the initial router frozen while training the model scores 4.9 on OSWorld, against 18.1 for VTR.</p>
+          <p class="note">Simulated desktop. The masks are illustrative.</p>
         </div>
       </div>
     </div>
@@ -212,36 +352,6 @@
         <div class="chart-container"><canvas id="chart-keep"></canvas></div>
       </div>
     </div>
-  </div>
-</section>
-
-<!-- ═══ METHOD ═══ -->
-<section id="method">
-  <div class="container">
-    <div class="section-label">The Method</div>
-    <h2 class="section-title">How It Works</h2>
-    <p class="section-subtitle">
-      A lightweight router decides which visual tokens enter the language model. We train it jointly with the model
-      to keep as few tokens as possible without losing accuracy.
-    </p>
-    <div class="how-grid">
-      <div class="how-card">
-        <span class="how-tag">01 · ROUTE</span>
-        <h3>Spatio-Temporal Router</h3>
-        <p>For each image region, the router reads the visual tokens of that region in the current and previous screenshots and outputs a keep probability. Dropped tokens are removed from the input, and kept tokens retain their positions.</p>
-      </div>
-      <div class="how-card">
-        <span class="how-tag">02 · MEASURE</span>
-        <h3>Measuring Degradation</h3>
-        <p>A full model sees all visual tokens and a blind model sees only the anchors. For each action token, the gap between their losses measures how much the history helps, and the gap to VTR measures how much dropping tokens hurts.</p>
-      </div>
-      <div class="how-card">
-        <span class="how-tag">03 · ADAPT</span>
-        <h3>Adaptive Weight</h3>
-        <p>We minimize the number of kept tokens subject to a small tolerance on lost accuracy, and adapt the weight on degradation by dual ascent. The router learns how many tokens each input needs, without a fixed budget.</p>
-      </div>
-    </div>
-    <div class="figure-card"><img src="assets/training.png" alt="Training in VTR: joint training, measuring degradation, and the adaptive weight"></div>
   </div>
 </section>
 
