@@ -189,29 +189,131 @@ const TOY = (() => {
 
 /* ───────────── Spatio-temporal router ───────────── */
 (function router() {
-  const { GW, T, N } = TOY, K = 3;
-  const fc = $('#rt-frame'), fctx = fc.getContext('2d');
-  let t = 8, seed = 1, sel = null, follow = 'field', playing = true, busy = 0;
-
-  // MLP glyph
-  const svg = $('#rt-mlp'), NS = 'http://www.w3.org/2000/svg';
-  const layers = [[4, 14], [5, 46], [3, 78], [1, 108]];
-  const nodes = layers.map(([n, x]) => Array.from({ length: n }, (_, i) => [x, 60 - (n - 1) * 11 + i * 22]));
-  for (let l = 0; l < 3; l++) for (const a of nodes[l]) for (const b of nodes[l + 1]) {
-    const e = document.createElementNS(NS, 'line'); e.setAttribute('x1', a[0]); e.setAttribute('y1', a[1]); e.setAttribute('x2', b[0]); e.setAttribute('y2', b[1]); svg.appendChild(e);
+  const { GW, T, N } = TOY, K = 3, NS = 'http://www.w3.org/2000/svg';
+  const svg = $('#rt-svg');
+  const S = (tag, a = {}, p = svg) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); p.appendChild(e); return e; };
+  const X = (s, a, p = svg) => { const e = S('text', a, p); e.textContent = s; return e; };
+  // italic math with sub- and superscripts, e.g. 'v_{t−3,j}'
+  function M(src, a, p = svg, size = 16) {
+    const el = S('text', { 'font-size': size, ...a, class: 'm ' + (a.class || '') }, p);
+    let shift = 0;
+    src.replace(/([_^])\{([^}]*)\}|([^_^]+)/g, (m, op, inner, plain) => {
+      const to = op === '_' ? size * 0.32 : op === '^' ? -size * 0.4 : 0;
+      const ts = S('tspan', op ? { dy: to - shift, 'font-size': Math.round(size * 0.68) } : { dy: to - shift }, el);
+      ts.textContent = op ? inner : plain; shift = to;
+    });
+    return el;
   }
-  const circles = nodes.map(L => L.map(([x, y]) => { const c = document.createElementNS(NS, 'circle'); c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 6); svg.appendChild(c); return c; }));
 
-  // crops of region j across o_{t-K} .. o_t
-  const cropBox = $('#rt-crops');
-  const crops = Array.from({ length: K + 1 }, (_, k) => {
-    const d = document.createElement('div'); d.className = 'rt-crop' + (k === K ? ' cur' : '');
-    const lab = k === K ? 't' : `t−${K - k}`;
-    d.innerHTML = `<span>o<sub>${lab}</sub></span>`;
-    const cv = document.createElement('canvas'); cv.width = 54; cv.height = 54; d.appendChild(cv); cropBox.appendChild(d);
-    return cv;
+  // layout
+  const FX = 64, FW = 180, FH = 105, CS = 7.5, RY = [62, 182, 302, 422];
+  const EX = 266, EW = 86, GX = 376, BX = 632, BW = 24, SEG = 80, SY = k => 120 + k * 88, CY = 292;
+  const L = [{ x: 772, h: 200, n: '1,024' }, { x: 832, h: 100, n: '256' }, { x: 886, h: 16, n: '1' }], LW = 14;
+  const SIG = 936, GA = { x: 972, y0: 200, y1: 384, w: 18 }, ND = { x: 1080, y: CY }, GB = { x: 1022, y: 140, w: 116, h: 62 };
+
+  S('defs').innerHTML =
+    '<marker id="rt-ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#b6bcc6"/></marker>' +
+    '<marker id="rt-ah-on" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#e07a1f"/></marker>';
+  [['Observations', FX + FW / 2], ['Vision encoder', EX + EW / 2], ['Concatenate', BX + BW / 2 + 14],
+   ['Router MLP', 832], ['Keep probability', GA.x + GA.w / 2], ['Gate', ND.x]].forEach(([s, x]) => X(s, { x, y: 30, class: 'hd', 'text-anchor': 'middle' }));
+
+  S('text', { x: GX + FW / 2, y: 30, class: 'hd', 'text-anchor': 'middle' }).innerHTML = 'Visual tokens <tspan class="m" font-size="16">v</tspan> ∈ ℝ<tspan class="m" font-size="11" dy="-6">D</tspan>';
+  // observations, vision encoder, token grids
+  const rows = [];
+  for (let k = 0; k <= K; k++) {
+    const y = RY[k], cy = y + FH / 2, cur = k === K;
+    const g = S('g', { class: 'row' + (cur ? ' cur' : '') });
+    M(cur ? 'o_{t}' : `o_{t−${K - k}}`, { x: FX - 10, y: cy + 6, 'text-anchor': 'end', class: cur ? 'curlab' : '' }, g, 20);
+    const fimg = S('image', { x: FX, y, width: FW, height: FH, preserveAspectRatio: 'none', class: 'pick' }, g);
+    S('rect', { x: FX, y, width: FW, height: FH, class: 'fbox' }, g);
+    const a1 = S('line', { x1: FX + FW + 4, y1: cy, x2: EX - 4, y2: cy, class: 'flow' }, g);
+    const enc = S('polygon', { points: `${EX},${y + 6} ${EX + EW},${y + 24} ${EX + EW},${y + FH - 24} ${EX},${y + FH - 6}`, class: 'enc' }, g);
+    X('Vision', { x: EX + EW / 2 - 3, y: cy - 4, class: 'enc-t', 'text-anchor': 'middle' }, g);
+    X('encoder', { x: EX + EW / 2 - 3, y: cy + 12, class: 'enc-t', 'text-anchor': 'middle' }, g);
+    const a2 = S('line', { x1: EX + EW + 4, y1: cy, x2: GX - 4, y2: cy, class: 'flow' }, g);
+    const gimg = S('image', { x: GX, y, width: FW, height: FH, preserveAspectRatio: 'none', class: 'pick grid' }, g);
+    const hf = S('rect', { width: CS + 2, height: CS + 2, class: 'hl' }, g), hg = S('rect', { width: CS + 2, height: CS + 2, class: 'hl' }, g);
+    rows.push({ y, fimg, gimg, a1, a2, enc, hf, hg });
+  }
+  X('shared weights', { x: EX + EW / 2 - 3, y: RY[K] + FH + 22, class: 'sm', 'text-anchor': 'middle' });
+
+  // router MLP: concatenated input, two hidden layers, one output
+  const fpoly = (x0, a0, b0, x1, a1, b1) => S('polygon', { points: `${x0},${a0} ${x1},${a1} ${x1},${b1} ${x0},${b0}`, class: 'funnel' });
+  const fun = [fpoly(BX + BW, SY(0), SY(K) + SEG, L[0].x, CY - L[0].h / 2, CY + L[0].h / 2)];
+  for (let i = 1; i < 3; i++) fun.push(fpoly(L[i - 1].x + LW, CY - L[i - 1].h / 2, CY + L[i - 1].h / 2, L[i].x, CY - L[i].h / 2, CY + L[i].h / 2));
+  rows.forEach(R => { R.mp = S('path', { class: 'flow merge' }); });
+  const segs = [];
+  for (let k = 0; k <= K; k++) {
+    const g = S('g', { class: 'seg' + (k === K ? ' cur' : '') });
+    const cells = Array.from({ length: 10 }, (_, i) => S('rect', { x: BX, y: SY(k) + i * 8, width: BW, height: 8 }, g));
+    S('rect', { x: BX, y: SY(k), width: BW, height: SEG, class: 'sbox' }, g);
+    M(k === K ? 'v_{t,j}' : `v_{t−${K - k},j}`, { x: BX + BW + 6, y: SY(k) + SEG / 2 + 5 }, g, 15);
+    segs.push({ g, cells });
+  }
+  M('x_{t,j}', { x: BX + BW / 2, y: SY(K) + SEG + 26, 'text-anchor': 'middle' }, svg, 19);
+  S('text', { x: BX + BW / 2, y: SY(K) + SEG + 50, 'text-anchor': 'middle', class: 'sm' }).innerHTML = '(<tspan class="m">K</tspan> + 1) × <tspan class="m">D</tspan> values';
+  const lay = L.map(l => {
+    X(l.n, { x: l.x + LW / 2, y: CY + L[0].h / 2 + 22, class: 'sm', 'text-anchor': 'middle' });
+    return S('rect', { x: l.x, y: CY - l.h / 2, width: LW, height: l.h, rx: 4, class: 'layer' });
   });
+  X('GELU', { x: (L[0].x + LW + L[1].x) / 2, y: CY - L[0].h / 2 - 2, class: 'sm', 'text-anchor': 'middle' });
+  X('GELU', { x: (L[1].x + LW + L[2].x) / 2, y: CY - L[1].h / 2 - 8, class: 'sm', 'text-anchor': 'middle' });
+  M('f_{φ}', { x: 832, y: CY + L[0].h / 2 + 48, 'text-anchor': 'middle' }, svg, 19);
 
+  // keep probability, gate, output
+  const late = S('g', { class: 'late' });
+  const ls = S('line', { x1: L[2].x + LW + 2, y1: CY, x2: SIG - 18, y2: CY, class: 'flow' }, late);
+  const sig = S('circle', { cx: SIG, cy: CY, r: 15, class: 'op' }, late); X('σ', { x: SIG, y: CY + 6, class: 'op-t', 'text-anchor': 'middle' }, late);
+  const lg = S('line', { x1: SIG + 16, y1: CY, x2: GA.x - 4, y2: CY, class: 'flow' }, late);
+  S('rect', { x: GA.x, y: GA.y0, width: GA.w, height: GA.y1 - GA.y0, rx: 4, class: 'gbg' }, late);
+  const gfill = S('rect', { x: GA.x, y: GA.y0, width: GA.w, height: GA.y1 - GA.y0, rx: 4, class: 'gfill' }, late);
+  M('p_{t,j}', { x: GA.x + GA.w / 2, y: GA.y0 - 12, 'text-anchor': 'middle' }, late, 18);
+  const pval = X('', { x: GA.x + GA.w / 2, y: GA.y1 + 26, 'text-anchor': 'middle', class: 'pval' }, late);
+  const lp = S('path', { d: `M${GA.x + GA.w + 3},${CY} H${ND.x - 19}`, class: 'flow' }, late);
+  const lb = S('path', { d: `M${GA.x + GA.w + 16},${CY} V${GB.y + GB.h / 2} H${GB.x - 3}`, class: 'flow' }, late);
+  const gb = S('rect', { x: GB.x, y: GB.y, width: GB.w, height: GB.h, rx: 10, class: 'gb' }, late);
+  S('text', { x: GB.x + GB.w / 2, y: GB.y + 24, 'text-anchor': 'middle' }, late).innerHTML = '<tspan class="m">g</tspan> ∼ Bernoulli(<tspan class="m">p</tspan>)';
+  const gv = X('', { x: GB.x + GB.w / 2, y: GB.y + 48, 'text-anchor': 'middle', class: 'gv' }, late);
+  const lgn = S('path', { d: `M${ND.x},${GB.y + GB.h + 3} V${ND.y - 19}`, class: 'flow' }, late);
+  M('g_{t,j}', { x: ND.x + 8, y: (GB.y + GB.h + ND.y) / 2 + 4 }, late, 16);
+  const node = S('circle', { cx: ND.x, cy: ND.y, r: 16, class: 'op' }, late); X('×', { x: ND.x, y: ND.y + 6, class: 'op-t', 'text-anchor': 'middle' }, late);
+  const lv = S('path', { class: 'flow' }, late);
+  M('v_{t,j}', { x: 860, y: 572, 'text-anchor': 'middle' }, late, 17);
+  X('the token being routed', { x: 912, y: 572, class: 'sm' }, late);
+  const lo = S('line', { x1: ND.x + 18, y1: ND.y, x2: ND.x + 44, y2: ND.y, class: 'flow' }, late);
+  const out1 = X('', { x: ND.x + 52, y: ND.y - 2, class: 'out1' }, late), out2 = S('text', { x: ND.x + 52, y: ND.y + 18, class: 'out2' }, late);
+
+  // token grids and token vectors computed from each simulated frame
+  const MIX = (() => { const rng = mulberry32(5); return Array.from({ length: 10 }, () => Array.from({ length: 10 }, () => (rng() * 2 - 1) * 0.9)); })();
+  const cache = new Map();
+  function enc(t) {
+    if (cache.has(t)) return cache.get(t);
+    const f = TOY.frame(t), d = f.data, W = TOY.W, lum = i => 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+    const gc = document.createElement('canvas'); gc.width = FW * 2; gc.height = FH * 2; const g = gc.getContext('2d');
+    g.fillStyle = '#0b1220'; g.fillRect(0, 0, gc.width, gc.height);
+    const feats = [];
+    for (let j = 0; j < N; j++) {
+      const c = j % GW, r = Math.floor(j / GW), n = T * T;
+      let R = 0, G = 0, B = 0, l2 = 0, gx = 0, gy = 0; const q = [0, 0, 0, 0];
+      for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+        const i = ((r * T + y) * W + c * T + x) * 4, l = lum(i);
+        R += d[i]; G += d[i + 1]; B += d[i + 2]; q[(y >= T / 2) * 2 + (x >= T / 2)] += l; l2 += l * l;
+        if (x) gx += Math.abs(l - lum(i - 4));
+        if (y) gy += Math.abs(l - lum(i - W * 4));
+      }
+      R /= n; G /= n; B /= n;
+      const lm = (q[0] + q[1] + q[2] + q[3]) / n, sd = Math.sqrt(Math.max(0, l2 / n - lm * lm));
+      g.fillStyle = `rgb(${R | 0},${G | 0},${B | 0})`; g.beginPath(); g.roundRect(c * CS * 2 + 1.5, r * CS * 2 + 1.5, CS * 2 - 3, CS * 2 - 3, 2.5); g.fill();
+      const raw = [R / 127.5 - 1, G / 127.5 - 1, B / 127.5 - 1, ...q.map(v => v / (n / 4) / 127.5 - 1), sd / 50 - 0.5, gx / n / 20 - 0.5, gy / n / 20 - 0.5];
+      feats.push(MIX.map(row => Math.tanh(1.6 * row.reduce((a, w, i) => a + w * raw[i], 0))));
+    }
+    const out = { frame: f.cv.toDataURL(), grid: gc.toDataURL(), feats };
+    cache.set(t, out); if (cache.size > 12) cache.delete(cache.keys().next().value);
+    return out;
+  }
+  const cmap = v => { const a = Math.min(1, Math.abs(v)), [r, g, b] = v < 0 ? [31, 95, 168] : [224, 122, 31]; return `rgb(${Math.round(248 + (r - 248) * a)},${Math.round(250 + (g - 250) * a)},${Math.round(252 + (b - 252) * a)})`; };
+
+  let t = 8, seed = 1, sel = null, follow = 'field', playing = true, run = 0, running = false;
   const region = () => {
     if (follow === 'field') return TOY.caretCell(t);
     if (follow === 'video') { const [x, y] = TOY.ballPos(t); return [Math.floor(x / T), Math.floor(y / T)]; }
@@ -219,39 +321,19 @@ const TOY = (() => {
     if (follow === 'static') return [18, 11];
     return sel;
   };
-
-  const stages = ['#st-crops', '#ar-1', '#st-mlp', '#ar-2', '#st-p', '#ar-3', '#st-gate'].map(s => $(s));
-  async function step() {
-    const my = ++busy;
-    const [c, r] = region(), j = r * GW + c;
-    const p = TOY.keepProb(t), g = TOY.gates(p, seed * 1000 + t);
-    TOY.paint(fctx, t, null, { sel: [c, r] });
-    stages.forEach(s => s.classList.remove('on'));
-    $('#rt-coin').className = 'rt-coin'; $('#rt-coin').textContent = '?';
-    $('#rt-out').className = 'rt-out'; $('#rt-out').innerHTML = '';
-    $('#rt-gauge').style.height = '0%'; $('#rt-pval').textContent = '0.00';
-    circles.flat().forEach(cc => cc.classList.remove('fire'));
-    $$('#rt-chips button').forEach(b => b.classList.toggle('active', b.dataset.r === follow));
-    // region j over time
-    crops.forEach((cv, k) => {
-      const ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(TOY.frame(t - K + k).cv, c * T, r * T, T, T, 0, 0, 54, 54);
+  function place(j) {
+    const c = j % GW, r = Math.floor(j / GW);
+    rows.forEach((R, k) => {
+      for (const [h, x0] of [[R.hf, FX], [R.hg, GX]]) { h.setAttribute('x', x0 + c * CS - 1); h.setAttribute('y', R.y + r * CS - 1); }
+      const x0 = GX + (c + 1) * CS + 1, y0 = R.y + (r + 0.5) * CS, x1 = BX - 3, y1 = SY(k) + SEG / 2;
+      R.mp.setAttribute('d', `M${x0},${y0} C${x0 + 60},${y0} ${x1 - 60},${y1} ${x1},${y1}`);
+      enc(t - K + k).feats[j].forEach((v, i) => segs[k].cells[i].setAttribute('fill', cmap(v)));
     });
-    stages[0].classList.add('on'); await sleep(350); if (my !== busy) return;
-    stages[1].classList.add('on'); stages[2].classList.add('on');
-    for (const L of circles) { L.forEach(cc => cc.classList.add('fire')); await sleep(170); if (my !== busy) return; }
-    stages[3].classList.add('on'); stages[4].classList.add('on');
-    $('#rt-gauge').style.height = (p[j] * 100).toFixed(0) + '%'; $('#rt-pval').textContent = p[j].toFixed(2);
-    await sleep(650); if (my !== busy) return;
-    stages[5].classList.add('on'); stages[6].classList.add('on');
-    const coin = $('#rt-coin'); coin.classList.add('spin'); await sleep(600); if (my !== busy) return;
-    const kept = g[j] === 1;
-    coin.className = 'rt-coin ' + (kept ? 'kept' : 'dropped'); coin.textContent = kept ? 'g = 1' : 'g = 0';
-    $('#rt-out').className = 'rt-out ' + (kept ? 'kept' : 'dropped');
-    $('#rt-out').innerHTML = kept ? `<b>kept</b>enters as <i>p</i>·<i>v</i> at position ${j}` : '<b>dropped</b>removed from the input';
-    // all regions of o_t
-    const mctx = $('#rt-map').getContext('2d');
-    TOY.paint(mctx, t, g, { sel: [c, r] });
+    lv.setAttribute('d', `M${GX + (c + 0.5) * CS},${RY[K] + (r + 1) * CS + 1} V580 H${ND.x} V${ND.y + 19}`);
+  }
+  const on = (els, v = true) => [].concat(els).forEach(e => e.classList.toggle('on', v));
+
+  function tokens(g, j) {
     const ids = []; g.forEach((v, i) => v && ids.push(i));
     $('#rt-count').textContent = `${ids.length} of ${N}`;
     const shown = ids.slice(0, 26);
@@ -261,16 +343,70 @@ const TOY = (() => {
       `<span class="tok gap">${N - ids.length} dropped</span>`;
   }
 
-  fc.addEventListener('click', ev => {
-    const b = fc.getBoundingClientRect();
-    sel = [Math.floor((ev.clientX - b.left) / b.width * GW), Math.floor((ev.clientY - b.top) / b.height * TOY.GH)];
-    follow = null; step();
+  async function cycle() {
+    const my = ++run; running = true;
+    const w = ms => sleep(ms).then(() => { if (my !== run) throw 0; });
+    try {
+      const [c, r] = region(), j = r * GW + c;
+      const p = TOY.keepProb(t), g = TOY.gates(p, seed * 1000 + t), kept = g[j] === 1;
+      $$('.on', svg).forEach(e => e.classList.remove('on'));
+      svg.classList.remove('sweeping'); gb.classList.remove('kept');
+      rows.forEach((R, k) => { const e = enc(t - K + k); R.fimg.setAttribute('href', e.frame); R.gimg.setAttribute('href', e.grid); });
+      place(j);
+      gfill.style.transform = 'scaleY(0)'; pval.textContent = ''; gv.textContent = ''; out1.textContent = ''; out2.innerHTML = '';
+      $$('#rt-chips button').forEach(b => b.classList.toggle('active', b.dataset.r === follow));
+      await w(300);
+      rows.forEach(R => on([R.a1, R.enc])); await w(600);
+      rows.forEach(R => on([R.a2, R.gimg])); await w(700);
+      rows.forEach(R => on(R.mp));
+      for (const s of segs) { s.g.classList.add('on'); await w(170); }
+      await w(150);
+      for (let i = 0; i < 3; i++) { on([fun[i], lay[i]]); await w(280); }
+      on([ls, sig]); await w(250); on(lg);
+      gfill.style.transform = `scaleY(${Math.max(0.015, p[j])})`; pval.textContent = p[j].toFixed(2); await w(750);
+      on([lp, lb, gb]);
+      for (let i = 0; i < 6; i++) { gv.textContent = `g = ${i % 2}`; await w(90); }
+      gv.textContent = `g = ${g[j]}`; gb.classList.toggle('kept', kept); on([lgn, lv, node]); await w(550);
+      on(lo); out1.textContent = kept ? 'kept' : 'dropped'; out1.setAttribute('class', 'out1 ' + (kept ? 'kept' : 'dropped'));
+      out2.innerHTML = kept ? '<tspan class="m">p</tspan> · <tspan class="m">v</tspan>' : 'removed';
+      await w(1100);
+      // the same router on every position of o_t
+      svg.classList.add('sweeping');
+      const mctx = $('#rt-map').getContext('2d'), mask = new Uint8Array(N);
+      for (let i = 0; i < N; i += 6) {
+        for (let q = i; q < Math.min(N, i + 6); q++) mask[q] = g[q];
+        const jj = Math.min(N - 1, i + 5); place(jj);
+        TOY.paint(mctx, t, mask, { sel: [jj % GW, Math.floor(jj / GW)] });
+        await w(18);
+      }
+      place(j); svg.classList.remove('sweeping');
+      TOY.paint(mctx, t, g, { sel: [c, r] }); tokens(g, j);
+      await w(2200);
+      running = false;
+      if (playing) { t++; cycle(); }
+    } catch (e) { if (e !== 0) throw e; }
+  }
+
+  svg.addEventListener('click', ev => {
+    const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+    for (let k = 0; k <= K; k++) for (const x0 of [FX, GX])
+      if (q.x >= x0 && q.x < x0 + FW && q.y >= RY[k] && q.y < RY[k] + FH) {
+        sel = [Math.floor((q.x - x0) / CS), Math.floor((q.y - RY[k]) / CS)]; follow = null; cycle(); return;
+      }
   });
-  $$('#rt-chips button').forEach(b => b.onclick = () => { follow = b.dataset.r; step(); });
-  $('#rt-play').onclick = () => { playing = !playing; $('#rt-play').textContent = playing ? '❚❚ Pause' : '▶ Play'; };
-  $('#rt-resample').onclick = () => { seed++; step(); };
-  step();
-  setInterval(() => { if (playing && document.visibilityState === 'visible') { t++; step(); } }, 3200);
+  $$('#rt-chips button').forEach(b => b.onclick = () => { follow = b.dataset.r; cycle(); });
+  $('#rt-play').onclick = () => {
+    playing = !playing; $('#rt-play').textContent = playing ? '❚❚ Pause' : '▶ Play';
+    if (playing && !running) { t++; cycle(); }
+  };
+  $('#rt-next').onclick = () => { t++; cycle(); };
+  $('#rt-resample').onclick = () => { seed++; cycle(); };
+  // first frame drawn statically, animation starts when the figure is on screen
+  rows.forEach((R, k) => { const e = enc(t - K + k); R.fimg.setAttribute('href', e.frame); R.gimg.setAttribute('href', e.grid); });
+  place(TOY.caretCell(t)[1] * GW + TOY.caretCell(t)[0]);
+  TOY.paint($('#rt-map').getContext('2d'), t, null);
+  new IntersectionObserver((es, ob) => { if (es[0].isIntersecting) { cycle(); ob.disconnect(); } }, { threshold: 0.3 }).observe(svg);
 })();
 
 /* ───────────── Anchors ───────────── */

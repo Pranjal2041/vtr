@@ -116,57 +116,30 @@
     <div class="section-label">The Router</div>
     <h2 class="section-title">Spatio-Temporal Router</h2>
     <p class="section-subtitle">
-      Whether a visual token is redundant depends on the screenshots before it. For each image region, a small MLP
-      reads the tokens of that region in the current screenshot and the <i>K</i> previous ones, and outputs a keep
+      Whether a visual token is redundant depends on the earlier observations. The vision encoder turns each screenshot
+      into one visual token per image region. For each position <i>j</i>, the router concatenates the tokens at
+      position <i>j</i> from the current observation and the <i>K</i> previous ones, and a small MLP maps them to a keep
       probability. A gate sampled from this probability decides whether the token enters the language model.
     </p>
     <div class="rt-card">
-      <div class="rt-grid">
-        <div class="rt-screen">
-          <div class="rt-cap">Current screenshot <i>o</i><sub><i>t</i></sub>. Click any region <i>j</i>.</div>
-          <canvas id="rt-frame" width="576" height="336"></canvas>
-          <div class="rt-chips" id="rt-chips">
-            <button data-r="field">File name</button><button data-r="video">Video</button>
-            <button data-r="clock">Clock</button><button data-r="static">Background</button>
-          </div>
+      <svg id="rt-svg" class="rt2" viewBox="0 0 1230 600" role="img" aria-label="Animated diagram of the spatio-temporal router"></svg>
+      <div class="rt-controls">
+        <div class="rt-chips" id="rt-chips">
+          <button data-r="field">File name</button><button data-r="video">Video</button>
+          <button data-r="clock">Clock</button><button data-r="static">Background</button>
         </div>
-        <div class="rt-pipe">
-          <div class="rt-stage" id="st-crops">
-            <div class="rt-cap">Region <i>j</i> over time</div>
-            <div class="rt-crops" id="rt-crops"></div>
-          </div>
-          <div class="rt-arrow" id="ar-1">→</div>
-          <div class="rt-stage" id="st-mlp">
-            <div class="rt-cap">Router <i>f</i><sub><i>φ</i></sub></div>
-            <svg id="rt-mlp" viewBox="0 0 120 120" width="120" height="120"></svg>
-            <div class="rt-formula"><i>p</i><sub><i>t,j</i></sub> = σ(<i>f</i><sub><i>φ</i></sub>(<i>x</i><sub><i>t,j</i></sub>))</div>
-          </div>
-          <div class="rt-arrow" id="ar-2">→</div>
-          <div class="rt-stage" id="st-p">
-            <div class="rt-cap">Keep probability</div>
-            <div class="rt-gauge"><div id="rt-gauge"></div></div>
-            <div class="rt-pval" id="rt-pval">0.00</div>
-          </div>
-          <div class="rt-arrow" id="ar-3">→</div>
-          <div class="rt-stage" id="st-gate">
-            <div class="rt-cap"><i>g</i> ~ Bernoulli(<i>p</i>)</div>
-            <div class="rt-coin" id="rt-coin">?</div>
-            <div class="rt-out" id="rt-out"></div>
-          </div>
-        </div>
+        <button class="btn btn-small" id="rt-play">❚❚ Pause</button>
+        <button class="btn btn-small" id="rt-next">Next observation</button>
+        <button class="btn btn-small" id="rt-resample">Sample gates again</button>
       </div>
       <div class="rt-seq">
-        <div class="rt-cap">Gates for every region of <i>o</i><sub><i>t</i></sub>. Kept tokens enter the language model scaled by <i>p</i>, at their original positions: <b id="rt-count"></b></div>
+        <div class="rt-cap">The same router runs on every position <i>j</i> of <i>o</i><sub><i>t</i></sub>. Kept tokens enter the language model scaled by <i>p</i>, at their original positions: <b id="rt-count"></b></div>
         <div class="rt-seq-row">
           <canvas id="rt-map" width="576" height="336"></canvas>
           <div class="rt-tokens" id="rt-tokens"></div>
         </div>
       </div>
-      <div class="rt-controls">
-        <button class="btn btn-small" id="rt-play">❚❚ Pause</button>
-        <button class="btn btn-small" id="rt-resample">Sample gates again</button>
-        <span class="note">Simulated desktop with <i>K</i> = 3 shown. The paper uses <i>K</i> = 10. Keep probabilities are illustrative.</span>
-      </div>
+      <p class="note" style="margin-top:1rem">Simulated desktop. The figure shows <i>K</i> = 3, so <i>x</i><sub><i>t,j</i></sub> has 4 × 2,048 values. The paper uses <i>K</i> = 10, which gives 11 × 2,048 = 22,528 inputs, and an MLP with hidden sizes 1,024 and 256 and GELU activations. Click any region of a screenshot or token grid to route it. Keep probabilities are illustrative.</p>
     </div>
 
     <div class="rt-card an-card">
