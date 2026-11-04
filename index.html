@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Visual Token Routing: Learning to Keep Tokens That Matter</title>
-<meta name="description" content="VTR learns which visual tokens a computer-use agent needs for its next action and drops the rest, matching full-resolution performance with 2.5 to 5.8 times fewer visual tokens.">
+<meta name="description" content="Visual Token Routing (VTR) trains a lightweight router jointly with a vision-language model to decide which visual tokens enter the language model. It matches full-resolution performance on OSWorld, CUA-World and video game action prediction with 2.5 to 5.8 times fewer visual tokens.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -19,31 +19,31 @@
     <p class="hero-tagline">Learning to Keep Tokens That Matter</p>
     <p class="hero-authors"><span>Pranjal Aggarwal · Sean Welleck</span><br>Carnegie Mellon University</p>
     <p class="hero-blurb">
-      Computer-use agents turn every screenshot into thousands of visual tokens.
-      <strong>VTR</strong> learns which ones the agent needs for its next action and drops the rest,
-      matching full-resolution performance with <strong>2.5 to 5.8× fewer tokens</strong>.
+      Computer-use agents encode every screenshot as thousands of visual tokens.
+      <strong>VTR</strong> trains a lightweight router together with the agent to decide which of these tokens
+      enter the language model. It matches the full-resolution model with 2.5 to 5.8× fewer visual tokens.
     </p>
     <div class="btn-row">
       <a class="btn btn-primary" href="#" id="paper-link">📄 Paper</a>
       <a class="btn" href="#" id="code-link">💻 Code</a>
-      <a class="btn" href="#play">🎛️ Playground</a>
-      <a class="btn" href="#quiz">🎯 Be the Router</a>
+      <a class="btn" href="#examples">🔍 Examples</a>
       <a class="btn" href="#results">📈 Results</a>
+      <a class="btn" href="#method">🧭 Method</a>
       <a class="btn" href="#citation">📚 BibTeX</a>
     </div>
   </div>
 </section>
 
-<!-- ═══ WHAT THE MODEL SEES ═══ -->
+<!-- ═══ ROUTED FRAMES ═══ -->
 <section id="sees">
   <div class="container">
     <div class="tabs" id="sees-tabs"></div>
     <div class="compare" id="compare">
       <img id="cmp-base" alt="Previous frame">
-      <div class="cmp-top" id="cmp-top"><img id="cmp-kept" alt="Next frame with the regions VTR drops dimmed"></div>
+      <div class="cmp-top" id="cmp-top"><img id="cmp-kept" alt="Current frame with the regions dropped by VTR dimmed"></div>
       <div class="cmp-handle" id="cmp-handle"></div>
       <div class="cmp-label left">Previous frame</div>
-      <div class="cmp-label right">Next frame, as the model gets it</div>
+      <div class="cmp-label right">Current frame, dropped regions dimmed</div>
       <div class="cmp-count" id="cmp-count"></div>
     </div>
     <p class="cmp-caption" id="cmp-caption"></p>
@@ -54,66 +54,80 @@
 <section id="stats">
   <div class="container">
     <div class="stats-bar">
-      <div class="stat-card"><div class="stat-number">2.5–5.8×</div><div class="stat-label">Fewer visual tokens</div></div>
-      <div class="stat-card"><div class="stat-number">3.3×</div><div class="stat-label">Lower inference cost</div></div>
-      <div class="stat-card"><div class="stat-number">2.9×</div><div class="stat-label">Faster prefill</div></div>
-      <div class="stat-card"><div class="stat-number">2,000</div><div class="stat-label">Training steps</div></div>
+      <div class="stat-card">
+        <div class="stat-tooltip"><p>VTR matches the full-resolution model with <strong>2.5×</strong> fewer visual tokens on OSWorld, <strong>2.9×</strong> on CUA-World and <strong>5.8×</strong> in video games.</p></div>
+        <div class="stat-number">2.5–5.8×</div><div class="stat-label">Fewer Visual Tokens</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-tooltip"><p>Inference cost relative to the full-resolution model is <strong>2.4×</strong> lower on OSWorld, <strong>1.8×</strong> on CUA-World and <strong>3.3×</strong> in video games.</p></div>
+        <div class="stat-number">3.3×</div><div class="stat-label">Lower Inference Cost</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-tooltip"><p>Prefill time per step is <strong>2.3×</strong> shorter on OSWorld, <strong>2.2×</strong> on CUA-World and <strong>2.9×</strong> in video games.</p></div>
+        <div class="stat-number">2.9×</div><div class="stat-label">Faster Prefill</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-tooltip"><p>VTR is trained on Qwen3.5-2B for <strong>2,000 steps</strong>. The router is a three-layer MLP with 23.3M parameters, about 1% of the language model.</p></div>
+        <div class="stat-number">2,000</div><div class="stat-label">Training Steps</div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ TOKEN RACE ═══ -->
-<section id="race">
+<!-- ═══ CONTEXT GROWTH ═══ -->
+<section id="context">
   <div class="container">
-    <div class="section-label">The Problem</div>
-    <h2 class="section-title">Context Fills Up Fast</h2>
+    <div class="section-label">Motivation</div>
+    <h2 class="section-title">Visual Tokens in an Agent's Context</h2>
     <p class="section-subtitle">
-      An agent keeps its past screenshots in context, and each one costs thousands of tokens.
-      Watch both agents take the same steps.
+      Qwen3.5 encodes a 1080p screenshot as 2,040 visual tokens, so an agent that keeps its history has over
+      200,000 visual tokens in context after 100 steps. In video games, one minute of play at 30 frames per second
+      adds about 400,000.
     </p>
     <div class="race">
       <div class="race-head">
         <div class="tabs left" id="race-tabs" style="margin:0">
-          <button class="tab active" data-mode="desktop">Desktop agent</button>
-          <button class="tab" data-mode="game">Video game</button>
+          <button class="tab active" data-mode="desktop">Desktop, 100 steps</button>
+          <button class="tab" data-mode="game">Video game, 1 minute</button>
         </div>
         <div class="race-clock" id="race-clock"></div>
         <button class="btn btn-small" id="race-replay">↻ Replay</button>
       </div>
       <div class="race-row">
-        <div class="race-name">Full resolution<small>every token, every screenshot</small></div>
+        <div class="race-name">Full resolution<small>all visual tokens</small></div>
         <canvas id="race-dense"></canvas>
         <div class="race-total" id="race-dense-total">0<small>tokens in context</small></div>
       </div>
       <div class="race-row">
-        <div class="race-name" style="color:var(--accent)">VTR<small>anchors in full, then only what matters</small></div>
+        <div class="race-name" style="color:var(--accent)">VTR<small>anchors in full, other frames routed</small></div>
         <canvas id="race-vtr"></canvas>
         <div class="race-total vtr" id="race-vtr-total">0<small>tokens in context</small></div>
       </div>
       <div class="race-result" id="race-result"></div>
     </div>
-    <p class="note">Each bar is one screenshot. Token counts are the averages reported in the paper. VTR keeps every 10th screenshot in full as an anchor.</p>
+    <p class="note">Each bar is one screenshot, and its height is the number of visual tokens it adds. VTR keeps every 10th screenshot in full as an anchor, and the other bars use the average number of kept tokens reported in the paper.</p>
   </div>
 </section>
 
-<!-- ═══ PLAYGROUND ═══ -->
-<section id="play">
+<!-- ═══ SIMULATED DESKTOP ═══ -->
+<section id="compare-rules">
   <div class="container">
-    <div class="section-label">Playground</div>
-    <h2 class="section-title">Change Is Not the Same as Relevance</h2>
+    <div class="section-label">Comparison</div>
+    <h2 class="section-title">Pixel-Diff and VTR on a Simulated Desktop</h2>
     <p class="section-subtitle">
-      A simple rule keeps every region that changed. Turn on the video or the clock and see what that costs.
-      VTR keeps only what the agent needs, here the file name it is typing.
+      Pixel-diff keeps every region that changed since the previous screenshot. In this simulated desktop, the agent
+      types a file name while a video plays in another window. Turn the video and the clock on or off to compare the
+      regions that each method keeps.
     </p>
     <div class="play">
       <div class="switches" id="switches">
-        <div class="switch on" data-key="typing"><span class="knob"></span>Agent typing</div>
-        <div class="switch on" data-key="video"><span class="knob"></span>Video playing</div>
-        <div class="switch" data-key="clock"><span class="knob"></span>Clock ticking</div>
+        <div class="switch on" data-key="typing"><span class="knob"></span>Typing</div>
+        <div class="switch on" data-key="video"><span class="knob"></span>Video</div>
+        <div class="switch" data-key="clock"><span class="knob"></span>Clock</div>
       </div>
       <div class="play-grid">
         <div class="screen-card">
-          <div class="screen-head"><span class="screen-title">Keep what changed</span><span class="screen-count" id="cnt-diff"></span></div>
+          <div class="screen-head"><span class="screen-title">Pixel-diff</span><span class="screen-count" id="cnt-diff"></span></div>
           <canvas id="cv-diff" width="576" height="336"></canvas>
         </div>
         <div class="screen-card vtr">
@@ -121,19 +135,19 @@
           <canvas id="cv-vtr" width="576" height="336"></canvas>
         </div>
       </div>
-      <p class="note">An illustration of the behavior we see in the paper's examples. Dark regions are dropped, and outlined regions are kept.</p>
+      <p class="note">The VTR panel is an illustration. It follows the behavior in the paper's examples, where VTR keeps the regions the agent acts on and drops background changes such as a playing video. Dimmed regions are dropped, and outlined regions are kept.</p>
     </div>
   </div>
 </section>
 
-<!-- ═══ QUIZ ═══ -->
-<section id="quiz">
+<!-- ═══ EXAMPLES ═══ -->
+<section id="examples">
   <div class="container">
-    <div class="section-label">Your Turn</div>
-    <h2 class="section-title">Be the Router</h2>
+    <div class="section-label">Examples</div>
+    <h2 class="section-title">Your Selection Compared with VTR</h2>
     <p class="section-subtitle">
-      Here is the previous frame and what happens next. Click the regions you would send to the model,
-      then see what VTR kept.
+      Each example shows the previous frame of a game and describes the next one. Select the regions you expect the
+      agent to need, then compare them with the regions VTR kept.
     </p>
     <div class="tabs left" id="quiz-tabs" style="margin-top:1.5rem"></div>
     <div class="quiz" id="quiz-box">
@@ -146,20 +160,20 @@
         <p class="quiz-setup" id="quiz-setup"></p>
         <p class="quiz-picked" id="quiz-picked"></p>
         <div class="quiz-actions">
-          <button class="btn btn-primary btn-small" id="quiz-reveal">Reveal VTR</button>
+          <button class="btn btn-primary btn-small" id="quiz-reveal">Show VTR</button>
           <button class="btn btn-small" id="quiz-clear">Clear</button>
-          <button class="btn btn-small" id="quiz-next">Next ›</button>
+          <button class="btn btn-small" id="quiz-next">Next example</button>
         </div>
         <div class="quiz-result">
           <div class="quiz-score">
-            <div><b id="qs-you">0</b><span>you kept</span></div>
-            <div><b id="qs-vtr" style="color:var(--accent)">0</b><span>VTR kept</span></div>
-            <div><b id="qs-both">0</b><span>in common</span></div>
+            <div><b id="qs-you">0</b><span>selected</span></div>
+            <div><b id="qs-vtr" style="color:var(--accent)">0</b><span>kept by VTR</span></div>
+            <div><b id="qs-both">0</b><span>overlap</span></div>
           </div>
           <p class="quiz-note" id="quiz-note"></p>
           <p class="note" style="margin-top:0.7rem">
             <span class="legend-dot" style="border:2px solid var(--kept)"></span>VTR
-            <span class="legend-dot" style="border:2px dashed #f59e0b; margin-left:0.8rem"></span>you
+            <span class="legend-dot" style="border:2px dashed #f59e0b; margin-left:0.8rem"></span>your selection
           </p>
         </div>
       </div>
@@ -173,8 +187,8 @@
     <div class="section-label">Findings</div>
     <h2 class="section-title">Key Results</h2>
     <p class="section-subtitle">
-      One model trained on desktop tasks and video games. It matches full resolution with far fewer tokens,
-      runs cheaper and faster, and decides on its own how many tokens each input needs.
+      We train one model on desktop tasks and video games, and evaluate it on OSWorld, CUA-World and next-action
+      prediction in 36 games. Dense is the same model at lower image resolutions.
     </p>
     <div class="tabs left" id="res-tabs" style="margin-top:1.5rem">
       <button class="tab active" data-d="osworld">OSWorld</button>
@@ -183,18 +197,18 @@
     </div>
     <div class="results-grid">
       <div class="result-card">
-        <h3>Same Score, Far Fewer Tokens</h3>
-        <p class="result-desc">VTR matches the full-resolution model with 2.5× fewer tokens on OSWorld, 2.9× on CUA-World and 5.8× in video games.</p>
+        <h3>Fewer Tokens at the Same Score</h3>
+        <p class="result-desc">VTR matches the full-resolution model with 2.5× fewer visual tokens on OSWorld, 2.9× on CUA-World and 5.8× in video games.</p>
         <div class="chart-container"><canvas id="chart-tokens"></canvas></div>
       </div>
       <div class="result-card">
-        <h3>Cheaper and Faster</h3>
-        <p class="result-desc">Fewer tokens cut inference cost by up to 3.3× and prefill time by up to 2.9×, at the same score.</p>
+        <h3>Lower Inference Cost</h3>
+        <p class="result-desc">VTR lowers inference cost by 2.4× on OSWorld, 1.8× on CUA-World and 3.3× in video games, and costs less than the dense model at half the image area.</p>
         <div class="chart-container"><canvas id="chart-cost"></canvas></div>
       </div>
       <div class="result-card">
-        <h3>The Router Picks Its Own Budget</h3>
-        <p class="result-desc">As more of a game screen moves, rules keep far more tokens. VTR keeps only a few more.</p>
+        <h3>Token Budget Adapts to the Input</h3>
+        <p class="result-desc">As more of a game screen moves, H.264 and pixel-diff keep many more tokens, while VTR keeps 2.7% to 5.9%.</p>
         <div class="chart-container"><canvas id="chart-keep"></canvas></div>
       </div>
     </div>
@@ -207,24 +221,24 @@
     <div class="section-label">The Method</div>
     <h2 class="section-title">How It Works</h2>
     <p class="section-subtitle">
-      A small router decides which tokens enter the model, and we train it together with the model so that
-      it drops as many tokens as it can without losing accuracy.
+      A lightweight router decides which visual tokens enter the language model. We train it jointly with the model
+      to keep as few tokens as possible without losing accuracy.
     </p>
     <div class="how-grid">
       <div class="how-card">
         <span class="how-tag">01 · ROUTE</span>
-        <h3>Look Across Time</h3>
-        <p>The router reads each image region across the current and previous screenshots, and keeps or drops its token. Kept tokens keep their positions on the screen.</p>
+        <h3>Spatio-Temporal Router</h3>
+        <p>For each image region, the router reads the visual tokens of that region in the current and previous screenshots and outputs a keep probability. Dropped tokens are removed from the input, and kept tokens retain their positions.</p>
       </div>
       <div class="how-card">
         <span class="how-tag">02 · MEASURE</span>
-        <h3>Compare to References</h3>
-        <p>A full model sees every token and a blind model sees only the anchors. Their losses show how much each action needs the history, and how much dropping tokens hurts.</p>
+        <h3>Measuring Degradation</h3>
+        <p>A full model sees all visual tokens and a blind model sees only the anchors. For each action token, the gap between their losses measures how much the history helps, and the gap to VTR measures how much dropping tokens hurts.</p>
       </div>
       <div class="how-card">
         <span class="how-tag">03 · ADAPT</span>
-        <h3>Never Lose Accuracy</h3>
-        <p>A weight goes up when the model starts to lose accuracy and down when it does not, so the router learns how many tokens each input needs without a fixed budget.</p>
+        <h3>Adaptive Weight</h3>
+        <p>We minimize the number of kept tokens subject to a small tolerance on lost accuracy, and adapt the weight on degradation by dual ascent. The router learns how many tokens each input needs, without a fixed budget.</p>
       </div>
     </div>
     <div class="figure-card"><img src="assets/training.png" alt="Training in VTR: joint training, measuring degradation, and the adaptive weight"></div>

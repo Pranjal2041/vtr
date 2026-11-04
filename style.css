@@ -116,7 +116,17 @@ section + section { border-top: 1px solid var(--border); }
   text-align: center; padding: 1.5rem 1rem; background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 12px; box-shadow: var(--shadow-card); transition: border-color 0.2s, transform 0.2s;
 }
+.stat-card { position: relative; }
 .stat-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.stat-tooltip {
+  position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%) scale(0.95);
+  background: var(--bg-card); border: 1px solid var(--accent); border-radius: 10px; padding: 0.85rem 1rem; width: 280px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12); opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 10; text-align: left;
+}
+.stat-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 7px solid transparent; border-top-color: var(--accent); }
+.stat-card:hover .stat-tooltip { opacity: 1; transform: translateX(-50%) scale(1); }
+.stat-tooltip p { font-size: 0.8rem; color: var(--text-muted); line-height: 1.55; margin: 0; }
+.stat-tooltip strong { color: var(--text); font-weight: 600; }
 .stat-number { font-family: var(--font-display); font-size: 2.6rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
 .stat-label { font-size: 0.95rem; color: var(--text-muted); margin-top: 0.35rem; }
 

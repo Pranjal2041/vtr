@@ -4,7 +4,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const EX = Object.fromEntries(EXAMPLES.map(e => [e.key, e]));
 const fmt = n => Math.round(n).toLocaleString('en-US');
 
-/* ───────────── What the model sees: before / after slider ───────────── */
+/* ───────────── Routed frames: before / after slider ───────────── */
 (function sees() {
   const order = ['dota', 'minecraft', 'candy', 'gta', 'gpredict', 'psychopy', 'librecad'];
   const tabs = $('#sees-tabs'), box = $('#compare'), top = $('#cmp-top'), handle = $('#cmp-handle');
@@ -45,14 +45,14 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
   setTimeout(() => requestAnimationFrame(sweep), 500);
 })();
 
-/* ───────────── Token race ───────────── */
+/* ───────────── Visual tokens in context ───────────── */
 (function race() {
   // Averages from the paper: OSWorld (desktop) and video game click prediction.
   const MODES = {
     desktop: { n: 100, dense: 2040, vtr: 807.9, unit: i => `Step ${i} of 100`,
-      result: ['2.5× fewer tokens', '2.4× lower cost', '2.3× faster prefill'] },
+      result: ['2.5× fewer visual tokens', '2.4× lower inference cost', '2.3× faster prefill'] },
     game: { n: 1800, dense: 220, vtr: 38.2, unit: i => `0:${String(Math.floor(i / 30)).padStart(2, '0')} of 1:00 at 30 fps`,
-      result: ['5.8× fewer tokens', '3.3× lower cost', '2.9× faster prefill'] },
+      result: ['5.8× fewer visual tokens', '3.3× lower inference cost', '2.9× faster prefill'] },
   };
   const B = 10; // anchor every 10 observations
   const cvD = $('#race-dense'), cvV = $('#race-vtr');
@@ -100,8 +100,8 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
   addEventListener('resize', () => draw(MODES[mode].n));
 })();
 
-/* ───────────── Playground: a toy desktop ───────────── */
-(function playground() {
+/* ───────────── Simulated desktop: pixel-diff and VTR ───────────── */
+(function simulatedDesktop() {
   const W = 576, H = 336, T = 24, GW = W / T, GH = H / T;
   const NAME = 'player_voice_full.mp3';
   const FIELD = { c0: 15, c1: 22, r0: 4, r1: 5 }; // tokens of the file-name field
@@ -201,12 +201,12 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
   setInterval(step, 850);
 })();
 
-/* ───────────── Be the router ───────────── */
+/* ───────────── Examples: reader selection compared with VTR ───────────── */
 (function quiz() {
   const order = ['candy', 'dota', 'minecraft', 'gta', 'candyfall'];
   const box = $('#quiz-box'), grid = $('#quiz-grid'), tabs = $('#quiz-tabs');
   let cur = null, picks = new Set();
-  const update = () => { $('#quiz-picked').textContent = picks.size ? `${picks.size} region${picks.size > 1 ? 's' : ''} selected` : 'Click the frame to select regions.'; };
+  const update = () => { $('#quiz-picked').textContent = picks.size ? `${picks.size} region${picks.size > 1 ? 's' : ''} selected` : 'Click regions on the frame to select them.'; };
   const load = key => {
     cur = EX[key]; picks = new Set();
     box.classList.remove('revealed');
@@ -231,7 +231,7 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
   };
   order.forEach((k, i) => {
     const b = document.createElement('button');
-    b.className = 'tab'; b.dataset.key = k; b.textContent = `${i + 1}. ${EX[k].name}`;
+    b.className = 'tab'; b.dataset.key = k; b.textContent = EX[k].name;
     b.onclick = () => load(k);
     tabs.appendChild(b);
   });
@@ -259,7 +259,7 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
   Chart.defaults.font.family = "'Inter', sans-serif";
   Chart.defaults.color = '#5a5a63';
   const COL = { dense: '#9ca3af', vtr: '#0891b2', h264: '#d97706', pdiff: '#7c3aed', frozen: '#dc2626' };
-  const NAMES = { dense: 'Dense, lower resolution', vtr: 'VTR', h264: 'H.264', pdiff: 'Pixel-diff', frozen: 'Frozen router' };
+  const NAMES = { dense: 'Dense', vtr: 'VTR', h264: 'H.264', pdiff: 'Pixel-diff', frozen: 'Frozen router' };
   const P = (...a) => a.map(([x, y]) => ({ x, y }));
   const D = {
     osworld: { y: 'Score', ymax: 20,
