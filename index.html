@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visual Token Routing: Learning to Keep Tokens That Matter</title>
+<meta name="description" content="VTR learns which visual tokens a computer-use agent needs for its next action and drops the rest, matching full-resolution performance with 2.5 to 5.8 times fewer visual tokens.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══ HERO ═══ -->
+<section id="hero">
+  <div class="container">
+    <h1 class="hero-title"><span class="highlight">Visual Token Routing</span></h1>
+    <p class="hero-tagline">Learning to Keep Tokens That Matter</p>
+    <p class="hero-authors"><span>Pranjal Aggarwal · Sean Welleck</span><br>Carnegie Mellon University</p>
+    <p class="hero-blurb">
+      Computer-use agents turn every screenshot into thousands of visual tokens.
+      <strong>VTR</strong> learns which ones the agent needs for its next action and drops the rest,
+      matching full-resolution performance with <strong>2.5 to 5.8× fewer tokens</strong>.
+    </p>
+    <div class="btn-row">
+      <a class="btn btn-primary" href="#" id="paper-link">📄 Paper</a>
+      <a class="btn" href="#" id="code-link">💻 Code</a>
+      <a class="btn" href="#play">🎛️ Playground</a>
+      <a class="btn" href="#quiz">🎯 Be the Router</a>
+      <a class="btn" href="#results">📈 Results</a>
+      <a class="btn" href="#citation">📚 BibTeX</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WHAT THE MODEL SEES ═══ -->
+<section id="sees">
+  <div class="container">
+    <div class="tabs" id="sees-tabs"></div>
+    <div class="compare" id="compare">
+      <img id="cmp-base" alt="Previous frame">
+      <div class="cmp-top" id="cmp-top"><img id="cmp-kept" alt="Next frame with the regions VTR drops dimmed"></div>
+      <div class="cmp-handle" id="cmp-handle"></div>
+      <div class="cmp-label left">Previous frame</div>
+      <div class="cmp-label right">Next frame, as the model gets it</div>
+      <div class="cmp-count" id="cmp-count"></div>
+    </div>
+    <p class="cmp-caption" id="cmp-caption"></p>
+  </div>
+</section>
+
+<!-- ═══ STATS ═══ -->
+<section id="stats">
+  <div class="container">
+    <div class="stats-bar">
+      <div class="stat-card"><div class="stat-number">2.5–5.8×</div><div class="stat-label">Fewer visual tokens</div></div>
+      <div class="stat-card"><div class="stat-number">3.3×</div><div class="stat-label">Lower inference cost</div></div>
+      <div class="stat-card"><div class="stat-number">2.9×</div><div class="stat-label">Faster prefill</div></div>
+      <div class="stat-card"><div class="stat-number">2,000</div><div class="stat-label">Training steps</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ TOKEN RACE ═══ -->
+<section id="race">
+  <div class="container">
+    <div class="section-label">The Problem</div>
+    <h2 class="section-title">Context Fills Up Fast</h2>
+    <p class="section-subtitle">
+      An agent keeps its past screenshots in context, and each one costs thousands of tokens.
+      Watch both agents take the same steps.
+    </p>
+    <div class="race">
+      <div class="race-head">
+        <div class="tabs left" id="race-tabs" style="margin:0">
+          <button class="tab active" data-mode="desktop">Desktop agent</button>
+          <button class="tab" data-mode="game">Video game</button>
+        </div>
+        <div class="race-clock" id="race-clock"></div>
+        <button class="btn btn-small" id="race-replay">↻ Replay</button>
+      </div>
+      <div class="race-row">
+        <div class="race-name">Full resolution<small>every token, every screenshot</small></div>
+        <canvas id="race-dense"></canvas>
+        <div class="race-total" id="race-dense-total">0<small>tokens in context</small></div>
+      </div>
+      <div class="race-row">
+        <div class="race-name" style="color:var(--accent)">VTR<small>anchors in full, then only what matters</small></div>
+        <canvas id="race-vtr"></canvas>
+        <div class="race-total vtr" id="race-vtr-total">0<small>tokens in context</small></div>
+      </div>
+      <div class="race-result" id="race-result"></div>
+    </div>
+    <p class="note">Each bar is one screenshot. Token counts are the averages reported in the paper. VTR keeps every 10th screenshot in full as an anchor.</p>
+  </div>
+</section>
+
+<!-- ═══ PLAYGROUND ═══ -->
+<section id="play">
+  <div class="container">
+    <div class="section-label">Playground</div>
+    <h2 class="section-title">Change Is Not the Same as Relevance</h2>
+    <p class="section-subtitle">
+      A simple rule keeps every region that changed. Turn on the video or the clock and see what that costs.
+      VTR keeps only what the agent needs, here the file name it is typing.
+    </p>
+    <div class="play">
+      <div class="switches" id="switches">
+        <div class="switch on" data-key="typing"><span class="knob"></span>Agent typing</div>
+        <div class="switch on" data-key="video"><span class="knob"></span>Video playing</div>
+        <div class="switch" data-key="clock"><span class="knob"></span>Clock ticking</div>
+      </div>
+      <div class="play-grid">
+        <div class="screen-card">
+          <div class="screen-head"><span class="screen-title">Keep what changed</span><span class="screen-count" id="cnt-diff"></span></div>
+          <canvas id="cv-diff" width="576" height="336"></canvas>
+        </div>
+        <div class="screen-card vtr">
+          <div class="screen-head"><span class="screen-title">VTR</span><span class="screen-count" id="cnt-vtr"></span></div>
+          <canvas id="cv-vtr" width="576" height="336"></canvas>
+        </div>
+      </div>
+      <p class="note">An illustration of the behavior we see in the paper's examples. Dark regions are dropped, and outlined regions are kept.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ QUIZ ═══ -->
+<section id="quiz">
+  <div class="container">
+    <div class="section-label">Your Turn</div>
+    <h2 class="section-title">Be the Router</h2>
+    <p class="section-subtitle">
+      Here is the previous frame and what happens next. Click the regions you would send to the model,
+      then see what VTR kept.
+    </p>
+    <div class="tabs left" id="quiz-tabs" style="margin-top:1.5rem"></div>
+    <div class="quiz" id="quiz-box">
+      <div class="quiz-board">
+        <img id="quiz-img" alt="Game frame">
+        <div class="quiz-grid" id="quiz-grid"></div>
+      </div>
+      <div class="quiz-side">
+        <h3 id="quiz-name"></h3>
+        <p class="quiz-setup" id="quiz-setup"></p>
+        <p class="quiz-picked" id="quiz-picked"></p>
+        <div class="quiz-actions">
+          <button class="btn btn-primary btn-small" id="quiz-reveal">Reveal VTR</button>
+          <button class="btn btn-small" id="quiz-clear">Clear</button>
+          <button class="btn btn-small" id="quiz-next">Next ›</button>
+        </div>
+        <div class="quiz-result">
+          <div class="quiz-score">
+            <div><b id="qs-you">0</b><span>you kept</span></div>
+            <div><b id="qs-vtr" style="color:var(--accent)">0</b><span>VTR kept</span></div>
+            <div><b id="qs-both">0</b><span>in common</span></div>
+          </div>
+          <p class="quiz-note" id="quiz-note"></p>
+          <p class="note" style="margin-top:0.7rem">
+            <span class="legend-dot" style="border:2px solid var(--kept)"></span>VTR
+            <span class="legend-dot" style="border:2px dashed #f59e0b; margin-left:0.8rem"></span>you
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ RESULTS ═══ -->
+<section id="results">
+  <div class="container">
+    <div class="section-label">Findings</div>
+    <h2 class="section-title">Key Results</h2>
+    <p class="section-subtitle">
+      One model trained on desktop tasks and video games. It matches full resolution with far fewer tokens,
+      runs cheaper and faster, and decides on its own how many tokens each input needs.
+    </p>
+    <div class="tabs left" id="res-tabs" style="margin-top:1.5rem">
+      <button class="tab active" data-d="osworld">OSWorld</button>
+      <button class="tab" data-d="cuaworld">CUA-World</button>
+      <button class="tab" data-d="games">Video games</button>
+    </div>
+    <div class="results-grid">
+      <div class="result-card">
+        <h3>Same Score, Far Fewer Tokens</h3>
+        <p class="result-desc">VTR matches the full-resolution model with 2.5× fewer tokens on OSWorld, 2.9× on CUA-World and 5.8× in video games.</p>
+        <div class="chart-container"><canvas id="chart-tokens"></canvas></div>
+      </div>
+      <div class="result-card">
+        <h3>Cheaper and Faster</h3>
+        <p class="result-desc">Fewer tokens cut inference cost by up to 3.3× and prefill time by up to 2.9×, at the same score.</p>
+        <div class="chart-container"><canvas id="chart-cost"></canvas></div>
+      </div>
+      <div class="result-card">
+        <h3>The Router Picks Its Own Budget</h3>
+        <p class="result-desc">As more of a game screen moves, rules keep far more tokens. VTR keeps only a few more.</p>
+        <div class="chart-container"><canvas id="chart-keep"></canvas></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ METHOD ═══ -->
+<section id="method">
+  <div class="container">
+    <div class="section-label">The Method</div>
+    <h2 class="section-title">How It Works</h2>
+    <p class="section-subtitle">
+      A small router decides which tokens enter the model, and we train it together with the model so that
+      it drops as many tokens as it can without losing accuracy.
+    </p>
+    <div class="how-grid">
+      <div class="how-card">
+        <span class="how-tag">01 · ROUTE</span>
+        <h3>Look Across Time</h3>
+        <p>The router reads each image region across the current and previous screenshots, and keeps or drops its token. Kept tokens keep their positions on the screen.</p>
+      </div>
+      <div class="how-card">
+        <span class="how-tag">02 · MEASURE</span>
+        <h3>Compare to References</h3>
+        <p>A full model sees every token and a blind model sees only the anchors. Their losses show how much each action needs the history, and how much dropping tokens hurts.</p>
+      </div>
+      <div class="how-card">
+        <span class="how-tag">03 · ADAPT</span>
+        <h3>Never Lose Accuracy</h3>
+        <p>A weight goes up when the model starts to lose accuracy and down when it does not, so the router learns how many tokens each input needs without a fixed budget.</p>
+      </div>
+    </div>
+    <div class="figure-card"><img src="assets/training.png" alt="Training in VTR: joint training, measuring degradation, and the adaptive weight"></div>
+  </div>
+</section>
+
+<!-- ═══ CITATION ═══ -->
+<section id="citation">
+  <div class="container">
+    <div class="section-label">Citation</div>
+    <h2 class="section-title">BibTeX</h2>
+    <div class="bibtex-wrap">
+      <button class="copy-btn" id="copy-bib">Copy</button>
+<pre class="bibtex" id="bibtex">@misc{aggarwal2026vtr,
+      title={Visual Token Routing: Learning to Keep Tokens That Matter},
+      author={Pranjal Aggarwal and Sean Welleck},
+      year={2026},
+}</pre>
+    </div>
+  </div>
+</section>
+
+<footer>Visual Token Routing · Carnegie Mellon University · 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="assets/examples.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
