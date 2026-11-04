@@ -79,34 +79,33 @@
 <section id="context">
   <div class="container">
     <div class="section-label">Motivation</div>
-    <h2 class="section-title">Visual Tokens in an Agent's Context</h2>
+    <h2 class="section-title">Visual Tokens Add Up Fast</h2>
     <p class="section-subtitle">
-      Qwen3.5 encodes a 1080p screenshot as 2,040 visual tokens, so an agent that keeps its history has over
-      200,000 visual tokens in context after 100 steps. In video games, one minute of play at 30 frames per second
-      adds about 400,000.
+      Every screenshot a VLM agent sees is thousands of visual tokens, and the agent sees a new one after every action.
+      With VTR, the context grows much more slowly.
     </p>
     <div class="race">
       <div class="race-head">
         <div class="tabs left" id="race-tabs" style="margin:0">
-          <button class="tab active" data-mode="desktop">Desktop, 100 steps</button>
-          <button class="tab" data-mode="game">Video game, 1 minute</button>
+          <button class="tab active" data-mode="desktop">Computer use</button>
+          <button class="tab" data-mode="game">Video game</button>
         </div>
         <div class="race-clock" id="race-clock"></div>
         <button class="btn btn-small" id="race-replay">↻ Replay</button>
       </div>
-      <div class="race-row">
-        <div class="race-name">Full resolution<small>all visual tokens</small></div>
-        <canvas id="race-dense"></canvas>
-        <div class="race-total" id="race-dense-total">0<small>tokens in context</small></div>
+      <div class="hbar-row">
+        <div class="hbar-name">Full resolution</div>
+        <div class="hbar-track"><div class="hbar-fill dense" id="race-dense"></div></div>
+        <div class="hbar-num" id="race-dense-total">0</div>
       </div>
-      <div class="race-row">
-        <div class="race-name" style="color:var(--accent)">VTR<small>anchors in full, other frames routed</small></div>
-        <canvas id="race-vtr"></canvas>
-        <div class="race-total vtr" id="race-vtr-total">0<small>tokens in context</small></div>
+      <div class="hbar-row">
+        <div class="hbar-name vtr">VTR</div>
+        <div class="hbar-track"><div class="hbar-fill vtr" id="race-vtr"></div></div>
+        <div class="hbar-num vtr" id="race-vtr-total">0</div>
       </div>
       <div class="race-result" id="race-result"></div>
     </div>
-    <p class="note">Each bar is one screenshot, and its height is the number of visual tokens it adds. VTR keeps every 10th screenshot in full as an anchor, and the other bars use the average number of kept tokens reported in the paper.</p>
+    <p class="note">Visual tokens in the agent's context. We use the average number of visual tokens per image from the paper, 2,040 at full resolution and 808 with VTR on OSWorld, and 220 and 38 per frame in video games.</p>
   </div>
 </section>
 
@@ -114,82 +113,30 @@
 <section id="router">
   <div class="container">
     <div class="section-label">The Router</div>
-    <h2 class="section-title">Spatio-Temporal Router</h2>
+    <h2 class="section-title">How VTR Drops Tokens</h2>
     <p class="section-subtitle">
-      Whether a visual token is redundant depends on the earlier observations. The vision encoder turns each screenshot
-      into one visual token per image region. For each position <i>j</i>, the router concatenates the tokens at
-      position <i>j</i> from the current observation and the <i>K</i> previous ones, and a small MLP maps them to a keep
-      probability. A gate sampled from this probability decides whether the token enters the language model.
+      A small router, about 1% the size of the VLM, looks at each region of the screen across the last few screenshots
+      and decides whether to keep it. Only the kept tokens go into the VLM. Every 10th screenshot is kept in full, so
+      the VLM always has a recent full view of the screen.
     </p>
-    <div class="rt-card">
-      <svg id="rt-svg" class="rt2" viewBox="0 0 1230 600" role="img" aria-label="Animated diagram of the spatio-temporal router"></svg>
-      <div class="rt-controls">
-        <div class="rt-chips" id="rt-chips">
-          <button data-r="field">File name</button><button data-r="video">Video</button>
-          <button data-r="clock">Clock</button><button data-r="static">Background</button>
+    <div class="flow-card">
+      <div class="tabs left" id="flow-tabs"></div>
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-cap">Recent screenshots</div>
+          <div class="flow-stack"><img id="flow-prev3" alt=""><img id="flow-prev2" alt=""><img id="flow-prev" alt="Previous screenshot"></div>
         </div>
-        <button class="btn btn-small" id="rt-play">❚❚ Pause</button>
-        <button class="btn btn-small" id="rt-next">Next observation</button>
-        <button class="btn btn-small" id="rt-resample">Sample gates again</button>
-      </div>
-      <div class="rt-seq">
-        <div class="rt-cap">The same router runs on every position <i>j</i> of <i>o</i><sub><i>t</i></sub>. Kept tokens enter the language model scaled by <i>p</i>, at their original positions: <b id="rt-count"></b></div>
-        <div class="rt-seq-row">
-          <canvas id="rt-map" width="576" height="336"></canvas>
-          <div class="rt-tokens" id="rt-tokens"></div>
+        <div class="flow-arrow"></div>
+        <div class="flow-box"><b>Router</b><small>about 1% of the VLM</small></div>
+        <div class="flow-arrow"></div>
+        <div class="flow-step wide">
+          <div class="flow-cap">Current screenshot, dropped regions dimmed</div>
+          <div class="flow-out"><img id="flow-kept" alt="Current screenshot with dropped regions dimmed"><div class="cmp-count" id="flow-count"></div></div>
         </div>
+        <div class="flow-arrow"></div>
+        <div class="flow-box vlm"><b>VLM</b><small>sees only the kept tokens</small></div>
       </div>
-      <p class="note" style="margin-top:1rem">Simulated desktop. The figure shows <i>K</i> = 3, so <i>x</i><sub><i>t,j</i></sub> has 4 × 2,048 values. The paper uses <i>K</i> = 10, which gives 11 × 2,048 = 22,528 inputs, and an MLP with hidden sizes 1,024 and 256 and GELU activations. Click any region of a screenshot or token grid to route it. Keep probabilities are illustrative.</p>
-    </div>
-
-    <div class="rt-card an-card">
-      <div class="an-head">
-        <div>
-          <h3>Anchors</h3>
-          <p>The first observation of each block of <i>B</i> is an anchor and is kept in full. The router acts on the other observations, with its history starting at the anchor, so each block refreshes the full view of the screen. The sliding variant keeps only the first observation in full and uses a rolling window of <i>K</i> previous observations.</p>
-        </div>
-        <div class="tabs left" id="an-tabs" style="margin:0">
-          <button class="tab active" data-m="anchors">Anchors</button>
-          <button class="tab" data-m="sliding">Sliding router</button>
-        </div>
-      </div>
-      <div class="an-frames" id="an-frames"></div>
-      <div class="an-seq">
-        <div class="an-row"><span class="an-name">Full resolution</span><div class="an-bar"><div id="an-full"></div></div><span class="an-num" id="an-full-n"></span></div>
-        <div class="an-row"><span class="an-name" style="color:var(--accent)">VTR</span><div class="an-bar" id="an-vtr"></div><span class="an-num" id="an-vtr-n"></span></div>
-      </div>
-      <p class="note">Twelve observations with <i>B</i> = 6 shown. The paper uses <i>B</i> = 10. Blue segments are anchor tokens and orange segments are routed tokens.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ SIMULATED DESKTOP ═══ -->
-<section id="compare-rules">
-  <div class="container">
-    <div class="section-label">Comparison</div>
-    <h2 class="section-title">Pixel-Diff and VTR on a Simulated Desktop</h2>
-    <p class="section-subtitle">
-      Pixel-diff keeps every region that changed since the previous screenshot. In this simulated desktop, the agent
-      types a file name while a video plays in another window. Turn the video and the clock on or off to compare the
-      regions that each method keeps.
-    </p>
-    <div class="play">
-      <div class="switches" id="switches">
-        <div class="switch on" data-key="typing"><span class="knob"></span>Typing</div>
-        <div class="switch on" data-key="video"><span class="knob"></span>Video</div>
-        <div class="switch" data-key="clock"><span class="knob"></span>Clock</div>
-      </div>
-      <div class="play-grid">
-        <div class="screen-card">
-          <div class="screen-head"><span class="screen-title">Pixel-diff</span><span class="screen-count" id="cnt-diff"></span></div>
-          <canvas id="cv-diff" width="576" height="336"></canvas>
-        </div>
-        <div class="screen-card vtr">
-          <div class="screen-head"><span class="screen-title">VTR</span><span class="screen-count" id="cnt-vtr"></span></div>
-          <canvas id="cv-vtr" width="576" height="336"></canvas>
-        </div>
-      </div>
-      <p class="note">The VTR panel is an illustration. It follows the behavior in the paper's examples, where VTR keeps the regions the agent acts on and drops background changes such as a playing video. Dimmed regions are dropped, and outlined regions are kept.</p>
+      <p class="cmp-caption" id="flow-caption"></p>
     </div>
   </div>
 </section>
@@ -200,94 +147,89 @@
     <div class="section-label">The Method</div>
     <h2 class="section-title">How It Works</h2>
     <p class="section-subtitle">
-      We train the router jointly with the language model, to keep as few visual tokens as possible without losing
-      accuracy. Two reference models measure how much accuracy dropping tokens costs, and an adaptive weight keeps
-      that cost within a small tolerance.
+      We train the router together with the VLM, so that it keeps as few visual tokens as possible without hurting
+      the VLM's actions.
     </p>
     <div class="steps">
       <div class="step-tabs" id="step-tabs">
         <button class="step-tab active" data-step="0"><span>01</span>Joint Training</button>
-        <button class="step-tab" data-step="1"><span>02</span>Measuring Degradation</button>
+        <button class="step-tab" data-step="1"><span>02</span>Measuring the Harm</button>
         <button class="step-tab" data-step="2"><span>03</span>Adaptive Weight</button>
         <button class="step-tab" data-step="3"><span>04</span>Initialization</button>
       </div>
 
-      <div class="step-panel active wide" data-step="0">
-        <div class="step-vis"><canvas id="jt-canvas" width="1360" height="660"></canvas></div>
-        <div class="step-text">
-          <div class="jt-head">
-            <h3>Joint Training</h3>
-            <div class="tabs left" id="jt-mode" style="margin:0">
-              <button class="tab active" data-m="train">Training</button>
-              <button class="tab" data-m="infer">Inference</button>
+      <div class="step-panel active" data-step="0">
+        <div class="step-vis">
+          <div class="jt2">
+            <div class="jt2-row">
+              <div class="jt2-in"><img src="assets/examples/dota_prev.jpg" class="a" alt=""><img src="assets/examples/dota_prev.jpg" alt=""><img src="assets/examples/dota_prev.jpg" alt=""><img src="assets/examples/dota_prev.jpg" alt=""></div>
+              <div class="jt2-model full"><b>Full model</b><small>sees every token</small></div>
             </div>
+            <div class="jt2-row">
+              <div class="jt2-in"><img src="assets/examples/dota_prev.jpg" class="a" alt=""><img src="assets/examples/dota_kept.jpg" alt=""><img src="assets/examples/dota_kept.jpg" alt=""><img src="assets/examples/dota_kept.jpg" alt=""></div>
+              <div class="jt2-model vtr"><b>Router + VLM</b><small>sees the kept tokens</small></div>
+            </div>
+            <div class="jt2-row">
+              <div class="jt2-in"><img src="assets/examples/dota_prev.jpg" class="a" alt=""><i></i><i></i><i></i></div>
+              <div class="jt2-model blind"><b>Blind model</b><small>sees every 10th screenshot</small></div>
+            </div>
+            <div class="jt2-legend"><span class="sq"></span>kept in full</div>
           </div>
-          <ol class="jt-phases" id="jt-phases">
-            <li>Sample gates and run three models on the same example: the full model on all tokens, the VLM <i>π</i><sub><i>θ</i></sub> on the kept tokens, and the blind model on the anchors only.</li>
-            <li>Update <i>π</i><sub><i>θ</i></sub> and the router with the cross-entropy (CE) loss on the kept tokens. The full and blind models are updated with the same loss on their own inputs.</li>
-            <li>Sample a second set of gates and update only the router with ℒ<sub>tok</sub> + <i>λ</i> ℒ<sub>deg</sub>, keeping <i>π</i><sub><i>θ</i></sub> fixed.</li>
-            <li>Update <i>λ</i> by dual ascent on the degradation ratio <i>r̄</i>.</li>
-          </ol>
-          <p class="note" id="jt-note">The reference models are used only during training. Click a step to show it.</p>
+        </div>
+        <div class="step-text">
+          <h3>Joint Training</h3>
+          <p>We train the router together with the VLM. The VLM learns to act from the kept tokens, and the router learns which tokens the VLM needs.</p>
+          <p>Keeping or dropping a token is a discrete choice, so it gives the router no gradient. We scale each kept token by its keep probability, as in mixture-of-experts models, so that the VLM's loss can train the router.</p>
+          <p>The full and blind models are trained alongside and are used only during training.</p>
         </div>
       </div>
 
       <div class="step-panel" data-step="1">
         <div class="step-vis">
-          <div class="tabs left" id="dg-type" style="margin-bottom:0.75rem">
-            <button class="tab active" data-t="needs">Token that needs the history</button>
-            <button class="tab" data-t="anchors">Token the anchors already predict</button>
-          </div>
-          <svg id="dg-axis" viewBox="0 0 760 230" width="100%"></svg>
-          <div class="dg-slider">
-            <label for="dg-k">Tokens kept by the router</label>
-            <input type="range" id="dg-k" min="0" max="100" value="25">
-            <b id="dg-kval">25%</b>
-          </div>
-          <div class="dg-read" id="dg-read"></div>
+          <svg class="dg2" viewBox="0 0 760 230" width="100%" role="img" aria-label="Losses of the full model, VTR and the blind model on one action">
+            <line x1="40" y1="120" x2="715" y2="120" stroke="#9aa3ae" stroke-width="2"/>
+            <polygon points="725,120 711,113 711,127" fill="#9aa3ae"/>
+            <text x="725" y="148" text-anchor="end" class="ax">loss</text>
+            <path d="M120 70 V58 H600 V70" fill="none" stroke="#6b7a8c" stroke-width="2"/>
+            <text x="360" y="44" text-anchor="middle" class="lb" fill="#475569">how much the extra screenshots help</text>
+            <path d="M120 170 V182 H250 V170" fill="none" stroke="#e07a1f" stroke-width="2"/>
+            <text x="185" y="208" text-anchor="middle" class="lb" fill="#b4531a">how much dropping tokens hurts</text>
+            <circle cx="120" cy="120" r="10" fill="#1f5fa8"/><text x="120" y="98" text-anchor="middle" class="pt" fill="#1f5fa8">Full model</text>
+            <circle cx="250" cy="120" r="10" fill="#e07a1f"/><text x="250" y="98" text-anchor="middle" class="pt" fill="#b4531a">VTR</text>
+            <circle cx="600" cy="120" r="10" fill="#6b7a8c"/><text x="600" y="98" text-anchor="middle" class="pt" fill="#475569">Blind model</text>
+          </svg>
         </div>
         <div class="step-text">
-          <h3>Measuring Degradation</h3>
-          <p>For each action token <i>n</i>, <i>i</i><sub><i>n</i></sub> = ℓ<sup>blind</sup><sub><i>n</i></sub> − ℓ<sup>full</sup><sub><i>n</i></sub> is how much the full history helps, and <i>d</i><sub><i>n</i></sub> = ℓ<sup>sparse</sup><sub><i>n</i></sub> − ℓ<sup>full</sup><sub><i>n</i></sub> is how much dropping tokens hurts. Subtracting ℓ<sup>full</sup><sub><i>n</i></sub> removes how hard the token is to predict in the first place.</p>
-          <p class="formula">ℒ<sub>deg</sub> = Σ [<i>i</i><sub><i>n</i></sub>]<sub>+</sub> <i>d</i><sub><i>n</i></sub> / Σ [<i>i</i><sub><i>n</i></sub>]<sub>+</sub></p>
-          <p>Tokens that the anchors predict as well as the full history get zero weight, since dropping tokens should not matter for them.</p>
-          <p class="note">Loss values are illustrative.</p>
+          <h3>Measuring the Harm</h3>
+          <p>To know how much dropping tokens hurts, we compare the VLM's loss with the full model's loss on each action.</p>
+          <p>Some actions are easy even from every 10th screenshot, so dropping tokens should not matter for them. We therefore weight each action by how much the full model beats the blind model. This way, the actions where the extra screenshots matter count the most.</p>
         </div>
       </div>
 
       <div class="step-panel" data-step="2">
         <div class="step-vis">
-          <canvas id="aw-chart" width="960" height="600"></canvas>
-          <div class="dg-slider">
-            <label for="aw-r">Tolerance <i>r</i>*</label>
-            <input type="range" id="aw-r" min="2" max="40" value="10">
-            <b id="aw-rval">0.10</b>
-            <button class="btn btn-small" id="aw-run">▶ Train</button>
-          </div>
+          <div class="chart-container tall"><canvas id="chart-rbar"></canvas></div>
         </div>
         <div class="step-text">
           <h3>Adaptive Weight</h3>
-          <p>We minimize the expected fraction of kept tokens subject to <i>r̄</i> ≤ <i>r</i>*, where <i>r̄</i> = Σ<i>d</i><sub><i>n</i></sub> / Σ<i>i</i><sub><i>n</i></sub> is the share of the benefit of the full history that the model loses. ℒ<sub>tok</sub> + <i>λ</i> ℒ<sub>deg</sub> is the Lagrangian of this problem, and we update <i>λ</i> by dual ascent:</p>
-          <p class="formula"><i>λ</i> ← max(0, <i>λ</i> + <i>α</i>(<i>r̄</i> − <i>r</i>*))</p>
-          <p>When <i>r̄</i> is above <i>r</i>*, <i>λ</i> grows and the router keeps more tokens. When it is below, <i>λ</i> shrinks and the router drops more. The tolerance constrains accuracy, not the number of tokens, so a smaller <i>r</i>* leads to more kept tokens. We set <i>r</i>* = 0.1.</p>
-          <p class="note">Curves are simulated with a toy degradation curve, with <i>α</i> = 0.2, <i>λ</i><sub>0</sub> = 0.5 and a 10 times larger step when <i>r̄</i> is below <i>r</i>*. Gray points are the validation <i>r̄</i> of the VTR training run with <i>r</i>* = 0.1.</p>
+          <p>With a fixed weight between keeping fewer tokens and accuracy, the router either keeps too many tokens or loses too much accuracy, and the right weight is hard to know in advance.</p>
+          <p>Instead, the router keeps as few tokens as possible, as long as the VLM loses at most 10% of the help it gets from the extra screenshots. The weight becomes a Lagrange multiplier, which we update by dual ascent. It goes up when the VLM loses more than 10%, and goes down when it loses less.</p>
+          <p>As a result, we never tell the router how many tokens to keep. The chart shows the share of the help lost on validation data during training.</p>
         </div>
       </div>
 
       <div class="step-panel" data-step="3">
         <div class="step-vis">
-          <div class="in-grid">
-            <div><div class="rt-cap">Changed since the previous observation</div><canvas id="in-changed" width="576" height="336"></canvas></div>
-            <div><div class="rt-cap">Objects segmented by SAM</div><canvas id="in-objects" width="576" height="336"></canvas></div>
-            <div><div class="rt-cap">Initial label: changed and an object</div><canvas id="in-label" width="576" height="336"></canvas></div>
-            <div><div class="rt-cap">After joint training</div><canvas id="in-vtr" width="576" height="336"></canvas></div>
+          <div class="cmp2-bars solo">
+            <h3>Score on OSWorld</h3>
+            <div class="sbar"><span class="vtr">VTR</span><div class="sbar-track"><div class="vtr" style="width:90.5%"></div></div><b>18.1</b></div>
+            <div class="sbar"><span>Frozen initial router</span><div class="sbar-track"><div class="frozen" style="width:24.6%"></div></div><b>4.9</b></div>
           </div>
         </div>
         <div class="step-text">
           <h3>Initialization</h3>
-          <p>In joint training, the router learns which tokens matter only through the loss of <i>π</i><sub><i>θ</i></sub>, which is a weak signal for a router with random weights. We first train the router alone, for 558 steps, to predict simple labels: a token is kept only if its region changed from the previous observation and belongs to an object segmented by SAM.</p>
-          <p>Joint training starts from this router and refines its decisions. Keeping the initial router frozen while training the model scores 4.9 on OSWorld, against 18.1 for VTR.</p>
-          <p class="note">Simulated desktop. The masks are illustrative.</p>
+          <p>Before joint training, we train the router alone on a simple rule. A region is kept if it changed since the previous screenshot and belongs to an object found by SAM.</p>
+          <p>Joint training then refines this router. If we keep the initial router frozen and train only the VLM, the score on OSWorld drops from 18.1 to 4.9.</p>
         </div>
       </div>
     </div>
