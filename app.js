@@ -58,28 +58,8 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
   new IntersectionObserver((es, ob) => { if (es[0].isIntersecting && !started) { started = true; run(); ob.disconnect(); } }, { threshold: 0.4 }).observe($('.race'));
 })();
 
-/* ───────────── Router flow on real examples ───────────── */
-(function routerFlow() {
-  const order = ['dota', 'candy', 'minecraft', 'gpredict'];
-  const tabs = $('#flow-tabs');
-  let i = 0, timer = null;
-  const show = key => {
-    const e = EX[key];
-    for (const id of ['#flow-prev', '#flow-prev2', '#flow-prev3']) $(id).src = `assets/examples/${key}_prev.jpg`;
-    const out = $('#flow-kept');
-    out.classList.remove('in'); void out.offsetWidth;
-    out.src = `assets/examples/${key}_kept.jpg`; out.classList.add('in');
-    $('#flow-count').innerHTML = `<b>${fmt(e.kept)}</b> of ${fmt(e.grid[0] * e.grid[1])} tokens kept`;
-    $('#flow-caption').textContent = `${e.name}. ${e.setup} ${e.note}`;
-    $$('.tab', tabs).forEach(t => t.classList.toggle('active', t.dataset.key === key));
-  };
-  order.forEach(k => {
-    const b = document.createElement('button'); b.className = 'tab'; b.dataset.key = k; b.textContent = EX[k].name;
-    b.onclick = () => { clearInterval(timer); show(k); }; tabs.appendChild(b);
-  });
-  show(order[0]);
-  timer = setInterval(() => { i = (i + 1) % order.length; show(order[i]); }, 4500);
-})();
+/* ───────────── Router video: plays while on screen ───────────── */
+new IntersectionObserver(es => { const v = es[0].target; if (es[0].isIntersecting) v.play(); else v.pause(); }, { threshold: 0.4 }).observe($('#router-video'));
 
 /* ───────────── How it works: step tabs ───────────── */
 $$('#step-tabs .step-tab').forEach(b => b.onclick = () => {

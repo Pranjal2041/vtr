@@ -115,29 +115,15 @@
     <div class="section-label">The Router</div>
     <h2 class="section-title">How VTR Drops Tokens</h2>
     <p class="section-subtitle">
-      A small router, about 1% the size of the VLM, looks at each region of the screen across the last few screenshots
-      and decides whether to keep it. Only the kept tokens go into the VLM. Every 10th screenshot is kept in full, so
-      the VLM always has a recent full view of the screen.
+      The vision encoder turns each screenshot into a grid of tokens. For each position in the grid, a small router,
+      about 1% the size of the VLM, reads that position's tokens across the last few screenshots and outputs a keep
+      probability. Only the kept tokens go into the VLM. Every 10th screenshot is kept in full, so the VLM always has a
+      recent full view of the screen.
     </p>
-    <div class="flow-card">
-      <div class="tabs left" id="flow-tabs"></div>
-      <div class="flow">
-        <div class="flow-step">
-          <div class="flow-cap">Recent screenshots</div>
-          <div class="flow-stack"><img id="flow-prev3" alt=""><img id="flow-prev2" alt=""><img id="flow-prev" alt="Previous screenshot"></div>
-        </div>
-        <div class="flow-arrow"></div>
-        <div class="flow-box"><b>Router</b><small>about 1% of the VLM</small></div>
-        <div class="flow-arrow"></div>
-        <div class="flow-step wide">
-          <div class="flow-cap">Current screenshot, dropped regions dimmed</div>
-          <div class="flow-out"><img id="flow-kept" alt="Current screenshot with dropped regions dimmed"><div class="cmp-count" id="flow-count"></div></div>
-        </div>
-        <div class="flow-arrow"></div>
-        <div class="flow-box vlm"><b>VLM</b><small>sees only the kept tokens</small></div>
-      </div>
-      <p class="cmp-caption" id="flow-caption"></p>
+    <div class="figure-card">
+      <video id="router-video" src="assets/vtr_router.mp4" poster="assets/vtr_router_poster.jpg" muted loop playsinline controls preload="metadata" aria-label="Animation: screenshots become tokens, the router gives each patch position a keep probability, and only the selected tokens remain"></video>
     </div>
+    <p class="note">Screenshots and keep probabilities are from a GIMP task in OSWorld. For clarity, the video shows 4 screenshots on a 16×9 grid, where each cell averages the 60×34 tokens inside it.</p>
   </div>
 </section>
 
