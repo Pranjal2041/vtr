@@ -28,6 +28,10 @@ uv run vtr serve l3lab/VTR-2B --port 8000
 
 The server has an OpenAI-compatible API. See [inference/README.md](inference/README.md) for a sample request and all options.
 
+## Train Your Own Model
+
+You can skip this if you use our model. See [training/README.md](training/README.md) to prepare data, train and export.
+
 ## Acknowledgments
 
 We thank the Qwen team for Qwen3.5-2B. This code is built on [vLLM](https://github.com/vllm-project/vllm) and [prime-rl](https://github.com/PrimeIntellect-ai/prime-rl).

@@ -1,0 +1,97 @@
+[project]
+name = "vtr"
+version = "0.1.0"
+description = "Training code for VTR, a learned visual-token router for Qwen3.5 VLMs"
+requires-python = "~=3.12.0"
+dependencies = [
+    "prime-rl[gpu,flash-attn,quack,kernels]",
+    "torch",
+    "torchvision",
+    "torchaudio",
+]
+
+[project.scripts]
+vtr-games = "vtr.prepare.games:games_main"
+vtr-frames = "vtr.prepare.games:frames_main"
+vtr-windows = "vtr.prepare.windows:main"
+vtr-concepts = "vtr.prepare.concepts:main"
+vtr-rows = "vtr.prepare.rows:main"
+vtr-labels = "vtr.coldstart.labels:main"
+vtr-coldstart = "vtr.coldstart.train:main"
+vtr-joint = "vtr.train:main"
+vtr-init = "vtr.export:init_main"
+vtr-export = "vtr.export:export_main"
+
+[tool.uv]
+required-version = ">=0.11.1"
+no-build-isolation-package = ["flash-attn"]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+override-dependencies = [
+    "tilelang==0.1.12",
+    "apache-tvm-ffi==0.1.11",
+    "nvidia-cudnn-cu13>=9.15 ; sys_platform == 'linux'",
+    "nvidia-cutlass-dsl==4.8.0",
+    "torch==2.13.0",
+    "openenv-core",
+    "mooncake-transfer-engine ; sys_platform == 'win32'",
+]
+
+[[tool.uv.dependency-metadata]]
+name = "ai-dynamo-runtime"
+version = "1.4.2"
+requires-dist = ["pydantic>=2.10.6,<=2.13.5", "uvloop>=0.21.0"]
+
+[[tool.uv.dependency-metadata]]
+name = "nixl"
+version = "0.10.1"
+requires-dist = ["nixl-cu13==0.10.1"]
+
+[[tool.uv.dependency-metadata]]
+name = "nvidia-cutlass-dsl"
+version = "4.8.0"
+requires-dist = ["nvidia-cutlass-dsl-libs-base==4.8.0", "nvidia-cutlass-dsl-libs-cu13==4.8.0"]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = [{ requirement = "torch", match-runtime = true }]
+mamba-ssm = ["torch>=2.13.0"]
+
+[tool.uv.extra-build-variables]
+flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+
+[tool.uv.sources]
+prime-rl = { git = "https://github.com/PrimeIntellect-ai/prime-rl", rev = "ad909f6" }
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vtr"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I"]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130-test"
+url = "https://download.pytorch.org/whl/test/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "flashinfer"
+url = "https://flashinfer.ai/whl"
+explicit = true
+
+[[tool.uv.index]]
+name = "flashinfer-cu130"
+url = "https://flashinfer.ai/whl/cu130"

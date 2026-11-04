@@ -1,0 +1,13 @@
+# Cold-start router training on frozen vision features.
+# `data` is the directory written by `vtr-labels`.
+
+model = "Qwen/Qwen3.5-2B"
+data = "data/coldstart"
+output_dir = "outputs/coldstart"
+image_sizes = { game = [640, 360] }
+batch_sizes = { desktop = 256, game = 768 }
+epochs = 3
+lr = 1.5e-3
+weight_decay = 1e-4
+vision_batch_size = 8
+seed = 0

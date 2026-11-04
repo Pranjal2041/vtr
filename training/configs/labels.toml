@@ -1,0 +1,6 @@
+# Cold-start labels. `manifest` is written by `vtr-windows` and `vtr-concepts`; rules are the defaults of `LabelConfig`.
+
+manifest = "data/coldstart/windows.jsonl"
+output = "data/coldstart"
+model = "Qwen/Qwen3.5-2B"
+image_sizes = { game = [640, 360] }

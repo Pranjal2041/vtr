@@ -1,0 +1,73 @@
+# Joint training of the router and the sparse language model.
+# `model.name` is the checkpoint written by `vtr-init` (base model + cold-start router).
+
+max_steps = 4000
+output_dir = "outputs/joint"
+dist_timeout_seconds = 3600
+
+[model]
+name = "checkpoints/init"
+attn = "flash_attention_2"
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+reshard_after_forward = false
+compile = "None"
+ac_offloading = "None"
+offload = "none"
+fusions = { enabled = [] }
+
+[model.vlm]
+freeze_vision_encoder = true
+
+[model.ac]
+mode = "full"
+
+[renderer]
+name = "qwen3.5"
+enable_thinking = true
+
+[data]
+name = "data/vtr"
+subsets = ["desktop", "game_30hz"]
+splits = ["train", "train"]
+probabilities = [0.25, 0.75]
+stopping_strategy = "all_exhausted"
+seq_len = 65536
+batch_size = 32
+shuffle = true
+seed = 0
+image_sizes = { game = [640, 360] }
+
+[val]
+interval = 50
+
+[val.data]
+name = "data/vtr"
+subsets = ["balanced_validation"]
+splits = ["validation"]
+seq_len = 65536
+shuffle = false
+image_sizes = { game = [640, 360] }
+
+[optim]
+lr = 1e-5
+weight_decay = 0.01
+max_norm = 1.0
+
+[router]
+block_size = 10
+lr = 5e-5
+weight_decay = 1e-4
+
+[objective]
+target = 0.1
+lambda_init = 0.5
+dual_lr = 0.2
+below_target_scale = 10.0
+
+[ckpt]
+interval = 500
+keep_last = 8
+
+[monitors]
+prime = "None"
